@@ -104,44 +104,50 @@ highly concurent transactional use in logging/quarantining. Some experience:
 Example data follows:
 =====================
 
-INSERT INTO users VALUES ( 1, 9, 5, 'user1+foo@y.example.com','Name1 Surname1', 'Y');
-INSERT INTO users VALUES ( 2, 7, 5, 'user1@y.example.com', 'Name1 Surname1', 'Y');
-INSERT INTO users VALUES ( 3, 7, 2, 'user2@y.example.com', 'Name2 Surname2', 'Y');
-INSERT INTO users VALUES ( 4, 7, 7, 'user3@z.example.com', 'Name3 Surname3', 'Y');
-INSERT INTO users VALUES ( 5, 7, 7, 'user4@example.com',   'Name4 Surname4', 'Y');
-INSERT INTO users VALUES ( 6, 7, 1, 'user5@example.com',   'Name5 Surname5', 'Y');
-INSERT INTO users VALUES ( 7, 5, 0, '@sub1.example.com', NULL, 'Y');
-INSERT INTO users VALUES ( 8, 5, 7, '@sub2.example.com', NULL, 'Y');
-INSERT INTO users VALUES ( 9, 5, 5, '@example.com',      NULL, 'Y');
-INSERT INTO users VALUES (10, 3, 8, 'userA', 'NameA SurnameA anywhere', 'Y');
-INSERT INTO users VALUES (11, 3, 9, 'userB', 'NameB SurnameB', 'Y');
-INSERT INTO users VALUES (12, 3,10, 'userC', 'NameC SurnameC', 'Y');
-INSERT INTO users VALUES (13, 3,11, 'userD', 'NameD SurnameD', 'Y');
-INSERT INTO users VALUES (14, 3, 0, '@sub1.example.net', NULL, 'Y');
-INSERT INTO users VALUES (15, 3, 7, '@sub2.example.net', NULL, 'Y');
-INSERT INTO users VALUES (16, 3, 5, '@example.net',      NULL, 'Y');
-INSERT INTO users VALUES (17, 7, 5, 'u1@example.org',    'u1', 'Y');
-INSERT INTO users VALUES (18, 7, 6, 'u2@example.org',    'u2', 'Y');
-INSERT INTO users VALUES (19, 7, 3, 'u3@example.org',    'u3', 'Y');
+INSERT INTO users VALUES ( 1, 9,  5, 'u1+foo@y.example.com','Name1 Surname1');
+INSERT INTO users VALUES ( 2, 8,  5, 'u1@y.example.com',    'Name1 Surname1');
+INSERT INTO users VALUES ( 3, 8,  2, 'u2@y.example.com',    'Name2 Surname2');
+INSERT INTO users VALUES ( 4, 8,  7, 'u3@z.example.com',    'Name3 Surname3');
+INSERT INTO users VALUES ( 5, 8,  7, 'u4@example.com',      'Name4 Surname4');
+INSERT INTO users VALUES ( 6, 8,  1, 'u5@example.com',      'Name5 Surname5');
+INSERT INTO users VALUES ( 7, 7,  9, 'userB+bar',           'NameB SurnameB');
+INSERT INTO users VALUES ( 8, 6, 10, 'userC',               'NameC SurnameC');
+INSERT INTO users VALUES ( 9, 6, 11, 'userD',               'NameD SurnameD');
+INSERT INTO users VALUES (10, 5, 61, '@.a.b.example.com',   NULL);
+INSERT INTO users VALUES (11, 4, 62, '@.sub2.example.com',  NULL);
+INSERT INTO users VALUES (12, 3, 70, '@example.com',        NULL);
+INSERT INTO users VALUES (12, 2, 70, '@.example.com',       NULL);
+INSERT INTO users VALUES (13, 1, 80, '@.com',               NULL);
+INSERT INTO users VALUES (13, 1, 80, '@.edu',               NULL);
+INSERT INTO users VALUES (14, 0, 99, '@.',                  NULL); -- catchall
 
--- INSERT INTO users VALUES (20, 0, 5, '@.',             NULL, 'N');  -- catchall
+INSERT INTO users VALUES (15, 5,  0, '@sub1.example.net',   NULL);
+INSERT INTO users VALUES (16, 5,  7, '@sub2.example.net',   NULL);
+INSERT INTO users VALUES (17, 3,  5, '@example.net',        NULL);
+INSERT INTO users VALUES (18, 8,  5, 'u1@example.org',      'u1');
+INSERT INTO users VALUES (19, 8,  6, 'u2@example.org',      'u2');
+INSERT INTO users VALUES (20, 8,  3, 'u3@example.org',      'u3');
 
 INSERT INTO policy (id, policy_name,
-  virus_lover, spam_lover, banned_files_lover, bad_header_lover,
-  bypass_virus_checks, bypass_spam_checks,
-  bypass_banned_checks, bypass_header_checks, spam_modifies_subj,
-  spam_tag_level, spam_tag2_level, spam_kill_level) VALUES
-  (1, 'Non-paying',    'N','N','N','N', 'Y','Y','Y','N', 'Y', 3.0,   7, 10),
-  (2, 'Uncensored',    'Y','Y','Y','Y', 'N','N','N','N', 'N', 3.0, 999, 999),
-  (3, 'Wants all spam','N','Y','N','N', 'N','N','N','N', 'Y', 3.0, 999, 999),
-  (4, 'Wants viruses', 'Y','N','Y','Y', 'N','N','N','N', 'Y', 3.0, 6.9, 6.9),
-  (5, 'Normal',        'N','N','N','N', 'N','N','N','N', 'Y', 3.0, 6.9, 6.9),
-  (6, 'Trigger happy', 'N','N','N','N', 'N','N','N','N', 'Y', 3.0,   5, 5),
-  (7, 'Permissive',    'N','N','N','Y', 'N','N','N','N', 'Y', 3.0,  10, 20),
-  (8, '6.5/7.8',       'N','N','N','N', 'N','N','N','N', 'N', 3.0, 6.5, 7.8),
-  (9, 'userB',         'N','N','N','Y', 'N','N','N','N', 'Y', 3.0, 6.3, 6.3),
-  (10,'userC',         'N','N','N','N', 'N','N','N','N', 'N', 3.0, 6.0, 6.0),
-  (11,'userD',         'Y','N','Y','Y', 'N','N','N','N', 'N', 3.0,   7, 7);
+  virus_lover, spam_lover, bypass_virus_checks, bypass_spam_checks,
+  spam_modifies_subj, spam_tag2_level, spam_kill_level) VALUES
+  (0, 'none',          NULL,NULL, NULL,NULL, NULL, NULL, NULL),
+  (1, 'Non-paying',    'N','N',   'Y','Y',   'N',  NULL, NULL),
+  (2, 'Uncensored',    'Y','Y',   'N','N',   'N',  NULL, NULL),
+  (3, 'Wants all spam','N','Y',   'N','N',   'Y',  NULL, NULL),
+  (4, 'Wants viruses', 'Y','N',   'N','N',   'Y',  NULL, NULL),
+  (5, 'Normal',        'N','N',   'N','N',   NULL, NULL, NULL),
+  (6, 'Trigger happy', NULL,NULL, NULL,NULL, NULL,  4.9,  4.9),
+  (7, 'Permissive',    NULL,NULL, NULL,NULL, NULL,  9,   20),
+  (8, '6.5/7.8',       NULL,NULL, NULL,NULL, NULL,  6.5,  7.8),
+  (9, 'userB',         NULL,NULL, NULL,NULL, 'N',   6.3,  6.3),
+  (10,'userC',         NULL,NULL, NULL,NULL, 'Y',   6.0,  6.0),
+  (11,'userD',         NULL,NULL, NULL,NULL, NULL,  7,    7),
+  (61,'our-sub-a',     NULL,'Y',  NULL,NULL, NULL, NULL, NULL),
+  (62,'our-sub-2',     NULL,'Y',  NULL,NULL, NULL, NULL, NULL),
+  (70,'our domain',    NULL,NULL, NULL,NULL, NULL, NULL, NULL),
+  (80,'our com & edu', NULL,NULL, NULL,NULL, NULL, NULL,  6.6),
+  (99,'catchall',      NULL,NULL, NULL,NULL, NULL, 5.6,   6.7);
 
 -- sender envelope addresses needed for white/blacklisting
 INSERT INTO mailaddr VALUES (1, 5, '@example.com');

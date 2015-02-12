@@ -1,6 +1,7 @@
 Customization of notification messages and log entries
 ======================================================
-  Mark Martinec <Mark.Martinec@ijs.si>, 2002, 2004, 2006, 2007, 2008
+  Mark Martinec <Mark.Martinec@ijs.si>,
+    2002, 2004, 2006, 2007, 2008, 2010, 2011
 
 Since March 2002 amavisd-new provides a way to customize e-mail notification
 messages that are sent in response to a virus (and spam) detection,
@@ -83,7 +84,7 @@ The substitution text for the following simple macros is built-in:
   partition_tag      give the current value of a partition_tag attribute which
                      will be stored in SQL records when SQL quarantining or
                      logging is enabled; the value is derived from a setting
-                     $sql_partition_tag (global or per-policy bank); a typical
+                     $partition_tag (global or per-policy bank); a typical
                      usage is to use ISO 8601 week number as a pertition tag;
   P  same as partition_tag
   u  same as date_unix_utc
@@ -102,9 +103,17 @@ The substitution text for the following simple macros is built-in:
      through a TLS-encrypted session, otherwise result is empty
 
   t  first entry in the 'Received' trace of the mail header
-  a  original SMTP session client IP address(empty if unknown,e.g. no XFORWARD)
   g  original SMTP session client DNS name (empty if unknown, e.g. no XFORWARD)
   e  best guess of the originator IP address collected from the Received trace
+  client_helo  client-supplied EHLO/HELO domain name from the original session
+     as obtained through XFORWARD or from a 'helo_name' AM.PDP attribute;
+  client_addr  original SMTP session client source IP address, same as %a
+     as obtained through XFORWARD or from a 'helo_name' AM.PDP attribute
+     or by parsing the topmost Received header field with a valid IP address;
+  a  is a synonym for client_addr
+  client_port  original SMTP session client source TCP port number
+     as obtained through XFORWARD or from a 'helo_name' AM.PDP attribute;
+  client_addr_port  combines addr and port, similar to: \[%a\]:[:client_port]
   l  (letter ell, suggesting 'local') is true if a variable 'originating' is
      true, and is an empty string otherwise; the boolean variable 'originating'
      is under policy bank control, and usually corresponds to a sending host
@@ -129,18 +138,18 @@ The substitution text for the following simple macros is built-in:
   m  'Message-ID' header field body
   r  first 'Resent-Message-ID' header field body
   header_field  field body of the header field specified in the argument;
-     can only obtain header field stored in $msginfo->orig_header_fields,
-     and only its first occurrence; currently these are: from, to, cc, sender,
-     subject, received, message-id, resent-message-id, in-reply-to, references,
-     precedence, list-id, user-agent, x-mailer, dkim-signature,
-     domainkey-signature, authentication-results;  argument is case-insensitive
+     the first argument is a header field name (case insensitive);
+     optional second argument truncates the result to n characters;
+     optional third argument j helps choosing the header field in case of
+     multiple fields of the same name: returns a j-th header field with a
+     given field name; search proceeds top-down if j >= 0, or bottom up for
+     negative values (-1=last, -2=next-to-last, ...); unspecified j is
+     equivalent to -1, i.e. the last header field of the specified name;
   useragent returns 'User-Agent: ...' or 'X-Mailer: ...' header field
      (whichever is present); an optional argument specifies whether
      an entire field is to be returned (empty or unrecognized argument),
      or just a field name (argument: 'name'), e.g. 'X-Mailer';
      or just a field body (argument 'body'),  e.g. 'Thunderbird_1.5.0.9';
-  x-mailer 'X-Mailer' header field body (just body, without header field name),
-     deprecated, use macros header_field or useragent instead;
 
   Q  MTA queue ID of the message if available (Courier, sendmail milter/AM.PDP)
   H  a list of all header lines (field may be wrapped over more than one line);
@@ -205,6 +214,22 @@ The substitution text for the following simple macros is built-in:
                 just a '1', but can be any string which evaluates to true
   banned_parts  a list of banned parts, with their full path in a MIME/archive
      e.g.:  multipart/mixed | application/octet-stream,.exe,.exe-ms,videos.exe
+
+  banned_parts_as_attr  similar to banned_parts, but uses a different syntax
+                using attribute/value pairs; currently known attributes are:
+     P: part's base name, i.e. a file name in a ./parts/ temporary directory
+     L: part's location (path) in a mail tree
+     M: MIME type as declared in MIME header fields of a message
+     T: short part's content type according to a file(1) utility
+     N: declared part names (none, one or more), as declared in MIME header
+        fields or in an archive (tar, zip, ...)
+     A: part's attributes as follows:
+        U=undecodable, C=crypted, D=directory, S=special(device), L=link
+     e.g.:
+       P=p003,L=1,M=multipart/mixed |
+       P=p002,L=1/2,M=application/octet-stream,T=rar,N=Setup1.1.rar |
+       P=p007,L=1/2/4,T=exe,T=exe-ms,N=setup.exe
+
   F  just the first leaf node from banned_parts, with a prepended rule comment
      (if any), e.g.:  rule #9:application/octet-stream,.exe,.exe-ms,videos.exe
 
@@ -252,6 +277,9 @@ The substitution text for the following simple macros is built-in:
   join  (just like a Perl function join): the first argument is a separator
      string, remaining arguments are strings to be concatenated, with a
      separator string inserted at every concatenation point;
+  limit  takes two arguments: a string size limit and some string,
+     returning the string from the second argument unchanged if its size is
+     below the limit, or cropped to the size limit, with '[...]' appended;
   dquote  encloses its argument in double quotes and doubles existing double
      quotes within a string (suitable to sanitize Subject header field,
      e.g. ab"oh"cd -> "ab""oh""cd");  provisional - exact interpretation
@@ -262,9 +290,15 @@ The substitution text for the following simple macros is built-in:
      but does not protect existing underlines, which makes it a lossy
      transformation (suitable for logging of From or To header fields);
      provisional - exact interpretation may change;
-  limit  takes two arguments: a string size limit and some string,
-     returning the string from the second argument unchanged if its size is
-     below the limit, or cropped to the size limit, with '[...]' appended;
+
+  mime2utf8  takes a string as its first argument, and an optional truncation
+     length as the second. The string is decoded as a MIME-Header string
+     (understands Q or B character set encodings like =?iso-8859-2?Q?...?=,
+     =?koi8-r?B?...?=) and converted to UTF-8, optionally truncated to the
+     specified size at clean UTF-8 boundaries, and returned as a result.
+     The macro can be useful to decode Subject or From header fields, e.g.:
+       [? [:header_field|Subject]||,\
+       Subject: [:dquote|[:mime2utf8|[:header_field|Subject]|100]]]#
 
   supplementary_info  gives access to some additional information provided by
      content scanners, such as a provided by SpamAssassin API routine get_tag.
@@ -300,19 +334,24 @@ The substitution text for the following simple macros is built-in:
                a signing domain;
        identity  returns a comma-separated list of signing identies ('i' tag)
                found in all valid signatures;
+       selector returns a comma-separated list of signing selectors ('s' tag)
+               found in all valid signatures;
        domain  returns a comma-separated list of signing domains ('d' tag)
                found in all valid signatures;
-       any other value (typically containing an '@') is interpreted as a
-               'verifier acceptable identity' ('mailbox@domain', or just
-               '@domain'), and the result is true if there exists a valid
-               signature whose signing identity matches the supplied
-               verifier acceptable identity, otherwise the result is false;
-               if mailbox@domain form is given, it must be exactly equal to
-               the signing identity for a match; when only a @domain form is
-               given, only the domain must match (mailbox is ignored),
-               allowing a partial match where a domain of a signing identity
-               is a subdomain of the verifier acceptable identity;
-
+       sig_sd  returns a comma-separated list of selector:domain pairs
+               found in all valid signatures; multiple occurences of the
+               same selector:domain pair are listed only once;
+       newsig_sd  returns a comma-separated list of selector:domain pairs
+               of newly created signatures, added to a mail header section;
+               multiple occurences of the same selector:domain pair are
+               listed only once;
+       any other value (which may contain an '@', but local part is ignored)
+               is interpreted as a 'verifier acceptable signing domain', and
+               the result is true if there exists a valid signature whose
+               signing domain ('d' tag) matches the supplied verifier
+               acceptable signing domain, otherwise the result is false;
+               the domain name in the argument may be prefixed by a '.', in
+               which case subdomains are allowed too;
 
   A couple of SpamAssassin look-alike macros with the same names and arguments
   as in SA, see 'man Mail::SpamAssassin::Conf' for details:
@@ -362,7 +401,7 @@ The substitution text for the following simple macros is built-in:
   ccat_name display name of the c.cat, takes into account per-recip bypass_*
   remote_mta  MTA to which a message was forwarded
   remote_mta_smtp_response  MTA's SMTP response on accepting forwarded message
-  smtp_response  either a MTA's SMTP response for forwarded mail, or
+  smtp_response  either an MTA's SMTP response for forwarded mail, or
             internally generated SMTP response for mail that was not forwarded
   score_boost internally generated score points to be added to a SA score
 
@@ -580,5 +619,5 @@ body string should be quoted in [" ... "] ). Body string may contain tokens
 %0, %1, %2, ... %9 as formal arguments. These will be substituted with actual
 arguments (or empty strings for missing arguments) at the time of a call.
 In most respects these dynamically defined macros behave just like other
-pre-defined macros. One distinction is that they can only result in a scalar
-string, it can not produce an array.
+pre-defined macros. One distinction is that they can only produce a scalar
+string, they can not produce an array.

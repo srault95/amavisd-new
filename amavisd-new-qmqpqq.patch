@@ -1,36 +1,36 @@
---- amavisd.ori	2009-06-25 14:36:06.000000000 +0200
-+++ amavisd	2009-06-25 14:37:27.000000000 +0200
-@@ -99,4 +99,5 @@
+--- amavisd.ori	2011-07-01 18:18:08.952738010 +0200
++++ amavisd	2011-07-01 18:20:01.302769163 +0200
+@@ -102,4 +102,5 @@
  #  Amavis::In::SMTP
  #( Amavis::In::Courier )
 +#  Amavis::In::QMQPqq
  #  Amavis::Out::SMTP::Protocol
  #  Amavis::Out::SMTP::Session
-@@ -3509,4 +3510,5 @@
+@@ -4023,4 +4024,5 @@
      $myproduct_name,
      $conn->socket_port eq '' ? 'unix socket' : "port ".$conn->socket_port);
 +  # must not use proto name QMQPqq in 'with'
-   $s .= "\n with $smtp_proto"  if $smtp_proto=~/^(ES|S|L)MTPS?A?\z/i; # rfc3848
-   $s .= "\n id $id"  if $id ne '';
-@@ -8516,4 +8518,5 @@
+   $s .= "\n with $smtp_proto"  if $smtp_proto=~/^(ES|S|L)MTPS?A?\z/i; #RFC 3848
+   $s .= "\n id $id"  if defined $id && $id ne '';
+@@ -9970,4 +9972,5 @@
    $extra_code_sql_lookup $extra_code_ldap
-   $extra_code_in_amcl $extra_code_in_smtp $extra_code_in_courier
+   $extra_code_in_ampdp $extra_code_in_smtp $extra_code_in_courier
 +  $extra_code_in_qmqpqq
    $extra_code_out_smtp $extra_code_out_pipe
    $extra_code_out_bsmtp $extra_code_out_local $extra_code_p0f
-@@ -8544,4 +8547,5 @@
- # Amavis::In::AMCL, Amavis::In::SMTP and In::Courier objects
- use vars qw($amcl_in_obj $smtp_in_obj $courier_in_obj);
+@@ -9997,4 +10000,5 @@
+ # Amavis::In::AMPDP, Amavis::In::SMTP and In::Courier objects
+ use vars qw($ampdp_in_obj $smtp_in_obj $courier_in_obj);
 +use vars qw($qmqpqq_in_obj);            # Amavis::In::QMQPqq object
  
  use vars qw($sql_dataset_conn_lookups); # Amavis::Out::SQL::Connection object
-@@ -9172,4 +9176,5 @@
+@@ -10701,4 +10705,5 @@
    do_log(0,"SMTP-in proto code  %s loaded", $extra_code_in_smtp    ?'':" NOT");
    do_log(0,"Courier proto code  %s loaded", $extra_code_in_courier ?'':" NOT");
 +  do_log(0,"QMQPqq-in proto code %s loaded", $extra_code_in_qmqpqq ?'':" NOT");
    do_log(0,"SMTP-out proto code %s loaded", $extra_code_out_smtp   ?'':" NOT");
    do_log(0,"Pipe-out proto code %s loaded", $extra_code_out_pipe   ?'':" NOT");
-@@ -9676,5 +9681,9 @@
+@@ -11315,5 +11320,9 @@
        die "unavailable support for protocol: $suggested_protocol";
      } elsif ($suggested_protocol eq 'QMQPqq') {
 -      die "unavailable support for protocol: $suggested_protocol";
@@ -41,37 +41,38 @@
 +      $qmqpqq_in_obj->process_qmqpqq_request($sock,$conn,\&check_mail);
      } elsif ($suggested_protocol eq 'TCP-LOOKUP') { #postfix maps, experimental
        process_tcp_lookup_request($sock, $conn);
-@@ -9769,4 +9778,5 @@
+@@ -11411,4 +11420,5 @@
    do_log(5,"child_finish_hook: invoking DESTROY methods");
-   undef $smtp_in_obj; undef $amcl_in_obj; undef $courier_in_obj;
+   undef $smtp_in_obj; undef $ampdp_in_obj; undef $courier_in_obj;
 +  undef $qmqpqq_in_obj;
-   undef $sql_storage; undef $sql_wblist; undef $sql_policy; undef $ldap_policy;
+   undef $sql_storage; undef $sql_wblist; undef $sql_lookups;
    undef $sql_dataset_conn_lookups; undef $sql_dataset_conn_storage;
-@@ -9779,4 +9789,5 @@
+@@ -11421,4 +11431,5 @@
  # do_log(5,"at the END handler: invoking DESTROY methods");
-   undef $smtp_in_obj; undef $amcl_in_obj; undef $courier_in_obj;
+   undef $smtp_in_obj; undef $ampdp_in_obj; undef $courier_in_obj;
 +  undef $qmqpqq_in_obj;
-   undef $sql_storage; undef $sql_wblist; undef $sql_policy; undef $ldap_policy;
+   undef $sql_storage; undef $sql_wblist; undef $sql_lookups;
    undef $sql_dataset_conn_lookups; undef $sql_dataset_conn_storage;
-@@ -13447,4 +13458,5 @@
+@@ -15443,4 +15454,5 @@
      $extra_code_sql_lookup, $extra_code_ldap,
-     $extra_code_in_amcl, $extra_code_in_smtp, $extra_code_in_courier,
+     $extra_code_in_ampdp, $extra_code_in_smtp, $extra_code_in_courier,
 +    $extra_code_in_qmqpqq,
      $extra_code_out_smtp, $extra_code_out_pipe,
      $extra_code_out_bsmtp, $extra_code_out_local, $extra_code_p0f,
-@@ -13741,5 +13753,10 @@
+@@ -15763,5 +15775,11 @@
      undef $extra_code_in_courier;
    }
 -  if ($needed_protocols_in{'QMQPqq'})  { die "In::QMQPqq code not available" }
 +  if ($needed_protocols_in{'QMQPqq'}) {
 +    eval $extra_code_in_qmqpqq or die "Problem in the In::QMQPqq code: $@";
-+    $extra_code_in_qmqpqq = 1;  # release memory occupied by the source code
++    # release memory occupied by the source code
++    undef $extra_code_in_qmqpqq; $extra_code_in_qmqpqq = 1;
 +  } else {
-+    $extra_code_in_qmqpqq = undef;
++    undef $extra_code_in_qmqpqq;
 +  }
  }
  
-@@ -17047,4 +17064,276 @@
+@@ -19245,4 +19263,276 @@
  __DATA__
  #
 +package Amavis::In::QMQPqq;
@@ -348,9 +349,9 @@
 +#
  package Amavis::Out::SMTP::Protocol;
  use strict;
---- amavisd.conf.ori	2009-06-25 14:35:47.000000000 +0200
-+++ amavisd.conf	2009-06-25 14:37:27.000000000 +0200
-@@ -59,6 +59,6 @@
+--- amavisd.conf.ori	2011-07-01 18:17:55.440742604 +0200
++++ amavisd.conf	2011-07-01 18:20:01.302769163 +0200
+@@ -55,6 +55,6 @@
                 # option(s) -p overrides $inet_socket_port and $unix_socketname
  
 -$inet_socket_port = 10024;   # listen on this local TCP port(s)
@@ -359,33 +360,3 @@
 +$inet_socket_port = 10628;   # accept connections on this local TCP port(s)
  
  $policy_bank{'MYNETS'} = {   # mail originating from @mynetworks
---- amavisd.conf-sample.ori	2009-06-25 14:35:59.000000000 +0200
-+++ amavisd.conf-sample	2009-06-25 14:37:27.000000000 +0200
-@@ -231,8 +231,11 @@
- # SMTP SERVER (INPUT) PROTOCOL SETTINGS (e.g. with Postfix, Exim v4, ...)
- #   (used when MTA is configured to pass mail to amavisd via SMTP or LMTP)
--$inet_socket_port = 10024;        # accept SMTP on this local TCP port
-+#$inet_socket_port = 10024;       # accept connection on this local TCP port
-                                   # (default is undef, i.e. disabled)
- # multiple ports may be provided: $inet_socket_port = [10024, 10026, 10028];
- 
-+$protocol = 'QMQPqq';        # suggested protocol to use on all input sockets
-+$inet_socket_port = 10628;   # accept connections on this local TCP port(s)
-+
- # SMTP SERVER (INPUT) access control
- # - do not allow free access to the amavisd SMTP port !!!
-@@ -2461,8 +2464,14 @@
- #   ],
- # };
-+#
-+# $policy_bank{'QMQPqq'} = {
-+#   log_level => 3,
-+#   protocol=>'QMQPqq', # possible with patch amavisd-new-qmqpqq.patch applied
-+# };
- 
- # NOTE: the use of policy banks for changing protocol on the input socket is
- # only needed when different protocols need to be spoken on different sockets
- # at the same time. For normal use just set globally e.g.: $protocol='AM.PDP';
-+# $interface_policy{'10628'} = 'QMQPqq';
- #
- #$policy_bank{'AM.PDP-SOCK'} = {

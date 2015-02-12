@@ -13,7 +13,7 @@ IMPORTS
                                              FROM SNMPv2-CONF;
 
 amavis MODULE-IDENTITY
-    LAST-UPDATED "200906010000Z"
+    LAST-UPDATED "201101250000Z"
     ORGANIZATION "Institut Jozef Stefan"
     CONTACT-INFO
 	"Mark Martinec
@@ -29,6 +29,22 @@ amavis MODULE-IDENTITY
     REVISION "200906010000Z"
     DESCRIPTION
 	"The original version of this MIB."
+
+    REVISION "201011150000Z"
+    DESCRIPTION
+	"Added variables userCounter1 .. userCounter10 and
+	 userGauge1 .. userGauge10 ."
+
+    REVISION "201101140000Z"
+    DESCRIPTION
+	"Add notes indicating that mail checks results cache is no longer used
+	 since version 2.7.0 of amavisd-new."
+
+    REVISION "201101250000Z"
+    DESCRIPTION
+	"Added variables inMsgsStatus* at 1.19 - 1.26, combining a final
+	 mail processing status with mail flow direction."
+
     ::= { enterprises 15312 2 1 }
 
 -- 1.3.6.1.4.1.15312        enterprises . Jozef Stefan Institute
@@ -198,10 +214,10 @@ inMsgsStatusAccepted OBJECT-TYPE
     MAX-ACCESS	read-only
     STATUS	current
     DESCRIPTION
-      "Number of mail messages received by amavisd and accepted with
-       a success status code (D_PASS, 2xx), but their forwarding remained
-       the responsibility of a MTA (null delivery_method, typical for
-       a milter setup)."
+      "Number of mail messages received by amavisd and accepted with a
+       success status code (D_PASS, 2xx), but their forwarding remained the
+       responsibility of an MTA (null delivery_method, typical for a milter
+       setup). Same value as inMsgsStatusDiscardedAll."
     ::= { amavisStats 2 7 }
 
 inMsgsStatusRelayed OBJECT-TYPE
@@ -210,7 +226,9 @@ inMsgsStatusRelayed OBJECT-TYPE
     STATUS	current
     DESCRIPTION
       "Number of mail messages received by amavisd and accepted with
-       a success status code (D_PASS, 2xx), and forwarded by amavisd."
+       a success status code (D_PASS, 2xx), and forwarded by amavisd.
+       Its value is a sum of inMsgsStatusRelayedUntaggedAll and
+       inMsgsStatusRelayedTaggedAll."
     ::= { amavisStats 2 8 }
 
 inMsgsStatusDiscarded OBJECT-TYPE
@@ -222,8 +240,8 @@ inMsgsStatusDiscarded OBJECT-TYPE
        success status code (2xx), not forwarded, and no delivery status
        notification was sent. Effectively a mail message was lost. It is
        a result of a D_DISCARD setting for all recipients of a message.
-       Note that quarantining uses independent settings, so a message
-       may or may not have been quarantined."
+       Note that quarantining uses independent settings, so a message may or
+       may not have been quarantined. Same value as inMsgsStatusDiscardedAll."
     ::= { amavisStats 2 9 }
 
 inMsgsStatusNoBounce OBJECT-TYPE
@@ -238,7 +256,8 @@ inMsgsStatusNoBounce OBJECT-TYPE
        but sending a DSN was suppressed (e.g. high spam score, infected).
        In other words, D_BOUNCE was converted into a D_DISCARD for this
        message. Note that quarantining uses independent settings, so a
-       message may or may not have been quarantined."
+       message may or may not have been quarantined.
+       Same value as inMsgsStatusNoBounceAll."
     ::= { amavisStats 2 10 }
 
 inMsgsStatusBounced OBJECT-TYPE
@@ -251,7 +270,8 @@ inMsgsStatusBounced OBJECT-TYPE
        was sent to a sender of a message informing him of a reason for
        blocking a message. It is a result of a D_BOUNCE setting for all
        recipients of a message. Note that quarantining uses independent
-       settings, so a message may or may not have been quarantined."
+       settings, so a message may or may not have been quarantined.
+       Same value as inMsgsStatusBouncedAll."
     ::= { amavisStats 2 11 }
 
 inMsgsStatusRejected OBJECT-TYPE
@@ -263,8 +283,8 @@ inMsgsStatusRejected OBJECT-TYPE
        code (5xx), not forwarded by amavisd, and no delivery status
        notification was sent. A duty of notifying the sender of a reject
        is delegated back to the sending MTA. Note that quarantining uses
-       independent settings, so a message may or may not have been
-       quarantined."
+       independent settings, so a message may or may not have been quarantined.
+       Same value as inMsgsStatusRejectedAll."
     ::= { amavisStats 2 12 }
 
 inMsgsStatusTempFailed OBJECT-TYPE
@@ -275,8 +295,8 @@ inMsgsStatusTempFailed OBJECT-TYPE
       "Number of mail messages whose reception resulted in a temporary
        failure status code (4xx) being send by amavisd back to MTA.
        A message was not forwarded by amavisd, and no delivery status
-       notification was sent. A message stayed in a MTA queue for future
-       attempts at delivery."
+       notification was sent. A message stayed in an MTA queue for future
+       attempts at delivery. Same value as inMsgsStatusTempFailedAll."
     ::= { amavisStats 2 13 }
 
 inMsgsSize OBJECT-TYPE
@@ -580,7 +600,7 @@ outMsgsProtoSMTP OBJECT-TYPE
     MAX-ACCESS	read-only
     STATUS	current
     DESCRIPTION
-      "Number of mail messages transmitted by amavisd to a MTA using a
+      "Number of mail messages transmitted by amavisd to an MTA using a
        SMTP protocol. This includes relayed mail messages as well as
        messages generated by amavisd, such as notifications."
     ::= { amavisStats 6 12 }
@@ -591,7 +611,7 @@ outMsgsProtoSMTPRelay OBJECT-TYPE
     STATUS	current
     DESCRIPTION
       "Number of relayed (fordarded, passed) mail messages transmitted by
-       amavisd to a MTA using a SMTP protocol."
+       amavisd to an MTA using a SMTP protocol."
     ::= { amavisStats 6 13 }
 
 outMsgsProtoSMTPSubmit OBJECT-TYPE
@@ -599,7 +619,7 @@ outMsgsProtoSMTPSubmit OBJECT-TYPE
     MAX-ACCESS	read-only
     STATUS	current
     DESCRIPTION
-      "Number of mail messages transmitted by amavisd to a MTA using a
+      "Number of mail messages transmitted by amavisd to an MTA using a
        SMTP protocol and generated by amavisd, such as notifications."
     ::= { amavisStats 6 14 }
 
@@ -608,7 +628,7 @@ outMsgsProtoLMTP OBJECT-TYPE
     MAX-ACCESS	read-only
     STATUS	current
     DESCRIPTION
-      "Number of mail messages transmitted by amavisd to a MTA using a
+      "Number of mail messages transmitted by amavisd to an MTA using a
        LMTP protocol. This includes relayed mail messages as well as
        messages generated by amavisd, such as notifications."
     ::= { amavisStats 6 15 }
@@ -619,7 +639,7 @@ outMsgsProtoLMTPRelay OBJECT-TYPE
     STATUS	current
     DESCRIPTION
       "Number of relayed (forwarded, passed) mail messages transmitted by
-       amavisd to a MTA using a LMTP protocol."
+       amavisd to an MTA using a LMTP protocol."
     ::= { amavisStats 6 16 }
 
 outMsgsProtoLMTPSubmit OBJECT-TYPE
@@ -627,7 +647,7 @@ outMsgsProtoLMTPSubmit OBJECT-TYPE
     MAX-ACCESS	read-only
     STATUS	current
     DESCRIPTION
-      "Number of mail messages transmitted by amavisd to a MTA using a
+      "Number of mail messages transmitted by amavisd to an MTA using a
        LMTP protocol and generated by amavisd, such as notifications."
     ::= { amavisStats 6 17 }
 
@@ -636,7 +656,7 @@ outMsgsProtoBSMTP OBJECT-TYPE
     MAX-ACCESS	read-only
     STATUS	current
     DESCRIPTION
-      "Number of mail messages transmitted by amavisd to a MTA using a
+      "Number of mail messages transmitted by amavisd to an MTA using a
        BSMTP protocol. This includes relayed mail messages as well as
        messages generated by amavisd, such as notifications."
     ::= { amavisStats 6 18 }
@@ -647,7 +667,7 @@ outMsgsProtoBSMTPRelay OBJECT-TYPE
     STATUS	current
     DESCRIPTION
       "Number of relayed (forwarded, passed) mail messages transmitted by
-       amavisd to a MTA using a BSMTP protocol."
+       amavisd to an MTA using a BSMTP protocol."
     ::= { amavisStats 6 19 }
 
 outMsgsProtoBSMTPSubmit OBJECT-TYPE
@@ -655,7 +675,7 @@ outMsgsProtoBSMTPSubmit OBJECT-TYPE
     MAX-ACCESS	read-only
     STATUS	current
     DESCRIPTION
-      "Number of mail messages transmitted by amavisd to a MTA using a
+      "Number of mail messages transmitted by amavisd to an MTA using a
        BSMTP protocol and generated by amavisd, such as notifications."
     ::= { amavisStats 6 20 }
 
@@ -664,7 +684,7 @@ outMsgsProtoPipe OBJECT-TYPE
     MAX-ACCESS	read-only
     STATUS	current
     DESCRIPTION
-      "Number of mail messages transmitted by amavisd to a MTA using a
+      "Number of mail messages transmitted by amavisd to an MTA using a
        pipe to an external program. This includes relayed mail messages
        as well as messages generated by amavisd, such as notifications."
     ::= { amavisStats 6 21 }
@@ -675,7 +695,7 @@ outMsgsProtoPipeRelay OBJECT-TYPE
     STATUS	current
     DESCRIPTION
       "Number of relayed (forwarded, passed) mail messages transmitted by
-       amavisd to a MTA using a pipe to an external program."
+       amavisd to an MTA using a pipe to an external program."
     ::= { amavisStats 6 22 }
 
 outMsgsProtoPipeSubmit OBJECT-TYPE
@@ -683,7 +703,7 @@ outMsgsProtoPipeSubmit OBJECT-TYPE
     MAX-ACCESS	read-only
     STATUS	current
     DESCRIPTION
-      "Number of mail messages transmitted by amavisd to a MTA using a
+      "Number of mail messages transmitted by amavisd to an MTA using a
        pipe to an external program and generated by amavisd, such as
        notifications."
     ::= { amavisStats 6 23 }
@@ -861,7 +881,7 @@ outMsgsSizeProtoSMTP OBJECT-TYPE
     MAX-ACCESS	read-only
     STATUS	current
     DESCRIPTION
-      "Number of octets in messages transmitted by amavisd to a MTA using
+      "Number of octets in messages transmitted by amavisd to an MTA using
        SMTP protocol. This includes relayed (passed) messages, as well as
        notifications generated by amavisd and messages quarantined to an
        e-mail address when using this method. The number may not be exact,
@@ -874,7 +894,7 @@ outMsgsSizeProtoSMTPRelay OBJECT-TYPE
     STATUS	current
     DESCRIPTION
       "Number of relayed (fordarded, passed) mail messages transmitted by
-       amavisd to a MTA using a SMTP protocol."
+       amavisd to an MTA using a SMTP protocol."
     ::= { amavisStats 7 13 }
 
 outMsgsSizeProtoSMTPSubmit OBJECT-TYPE
@@ -882,7 +902,7 @@ outMsgsSizeProtoSMTPSubmit OBJECT-TYPE
     MAX-ACCESS	read-only
     STATUS	current
     DESCRIPTION
-      "Number of mail messages transmitted by amavisd to a MTA using a
+      "Number of mail messages transmitted by amavisd to an MTA using a
        SMTP protocol and generated by amavisd, such as notifications."
     ::= { amavisStats 7 14 }
 
@@ -891,7 +911,7 @@ outMsgsSizeProtoLMTP OBJECT-TYPE
     MAX-ACCESS	read-only
     STATUS	current
     DESCRIPTION
-      "Number of octets in messages transmitted by amavisd to a MTA using
+      "Number of octets in messages transmitted by amavisd to an MTA using
        LMTP protocol. This includes relayed (passed) messages, as well as
        notifications generated by amavisd and messages quarantined to an
        e-mail address when using this method. The number may not be exact,
@@ -904,7 +924,7 @@ outMsgsSizeProtoLMTPRelay OBJECT-TYPE
     STATUS	current
     DESCRIPTION
       "Number of octets in relayed (forwarded, passed) mail messages
-       transmitted by amavisd to a MTA using a LMTP protocol."
+       transmitted by amavisd to an MTA using a LMTP protocol."
     ::= { amavisStats 7 16 }
 
 outMsgsSizeProtoLMTPSubmit OBJECT-TYPE
@@ -912,7 +932,7 @@ outMsgsSizeProtoLMTPSubmit OBJECT-TYPE
     MAX-ACCESS	read-only
     STATUS	current
     DESCRIPTION
-      "Number of octets in mail messages transmitted by amavisd to a MTA
+      "Number of octets in mail messages transmitted by amavisd to an MTA
        using a LMTP protocol and generated by amavisd, such as notifications."
     ::= { amavisStats 7 17 }
 
@@ -921,7 +941,7 @@ outMsgsSizeProtoBSMTP OBJECT-TYPE
     MAX-ACCESS	read-only
     STATUS	current
     DESCRIPTION
-      "Number of octets in messages transmitted by amavisd to a MTA using
+      "Number of octets in messages transmitted by amavisd to an MTA using
        BSMTP protocol. This includes relayed (passed) messages, as well as
        notifications generated by amavisd and messages quarantined through
        BSMTP. The number may not be exact, as it currently does not account
@@ -934,7 +954,7 @@ outMsgsSizeProtoBSMTPRelay OBJECT-TYPE
     STATUS	current
     DESCRIPTION
       "Number of octets in relayed (forwarded, passed) mail messages
-       transmitted by amavisd to a MTA using a BSMTP protocol."
+       transmitted by amavisd to an MTA using a BSMTP protocol."
     ::= { amavisStats 7 19 }
 
 outMsgsSizeProtoBSMTPSubmit OBJECT-TYPE
@@ -942,7 +962,7 @@ outMsgsSizeProtoBSMTPSubmit OBJECT-TYPE
     MAX-ACCESS	read-only
     STATUS	current
     DESCRIPTION
-      "Number of octets in mail messages transmitted by amavisd to a MTA
+      "Number of octets in mail messages transmitted by amavisd to an MTA
        using a BSMTP protocol and generated by amavisd, such as quarantined
        messages and notifications."
     ::= { amavisStats 7 20 }
@@ -965,7 +985,7 @@ outMsgsSizeProtoPipeRelay OBJECT-TYPE
     STATUS	current
     DESCRIPTION
       "Number of octets in relayed (forwarded, passed) mail messages
-       transmitted by amavisd to a MTA using a pipe to an external program."
+       transmitted by amavisd to an MTA using a pipe to an external program."
     ::= { amavisStats 7 22 }
 
 outMsgsSizeProtoPipeSubmit OBJECT-TYPE
@@ -973,7 +993,7 @@ outMsgsSizeProtoPipeSubmit OBJECT-TYPE
     MAX-ACCESS	read-only
     STATUS	current
     DESCRIPTION
-      "Number of octets in mail messages transmitted by amavisd to a MTA
+      "Number of octets in mail messages transmitted by amavisd to an MTA
        using a pipe to an external program and generated by amavisd,
        such as quarantined messages and notifications."
     ::= { amavisStats 7 23 }
@@ -1039,7 +1059,7 @@ quarMtaFailedMsgs OBJECT-TYPE
     STATUS	current
     DESCRIPTION
       "Number of clean-contents messages quarantined because of a failure
-       to feed a message back to a MTA. Should be zero at all times,
+       to feed a message back to an MTA. Should be zero at all times,
        quarantining is not supposed to be enabled for MTA failures."
     ::= { amavisStats 8 4 }
 
@@ -1154,7 +1174,7 @@ quarMtaFailedMsgsSize OBJECT-TYPE
     STATUS	current
     DESCRIPTION
       "Number of octets in clean-contents messages quarantined because of
-       a failure to feed a message back to a MTA."
+       a failure to feed a message back to an MTA."
     ::= { amavisStats 9 4 }
 
 quarOversizedMsgsSize OBJECT-TYPE
@@ -1697,7 +1717,7 @@ cacheAttempts OBJECT-TYPE
     STATUS	current
     DESCRIPTION
       "Number of times a database of cached previous scanning results
-       was consulted."
+       was consulted. Cache is not used any longer since 2.7.0."
     ::= { amavisStats 11 1 }
 
 cacheMisses OBJECT-TYPE
@@ -1706,7 +1726,8 @@ cacheMisses OBJECT-TYPE
     STATUS	current
     DESCRIPTION
       "Number of times a database of cached previous scanning results
-       was consulted but did not find a message with the same body hash."
+       was consulted but did not find a message with the same body hash.
+       Cache is not used any longer since 2.7.0."
     ::= { amavisStats 11 2 }
 
 cacheHits OBJECT-TYPE
@@ -1716,7 +1737,7 @@ cacheHits OBJECT-TYPE
     DESCRIPTION
       "Number of times a database of cached previous scanning results
        was consulted and found previous scanning results for a message
-       with the same body hash."
+       with the same body hash. Cache is not used any longer since 2.7.0."
     ::= { amavisStats 11 3 }
 
 cacheHitsVirusCheck OBJECT-TYPE
@@ -1726,7 +1747,8 @@ cacheHitsVirusCheck OBJECT-TYPE
     DESCRIPTION
       "Number of times a database of cached previous scanning results was
        consulted and found previous (positive or negative) virus scanning
-       results for a message with the same body hash."
+       results for a message with the same body hash. Cache is not used
+       any longer since 2.7.0."
     ::= { amavisStats 11 4 }
 
 cacheHitsVirusMsgs OBJECT-TYPE
@@ -1736,7 +1758,8 @@ cacheHitsVirusMsgs OBJECT-TYPE
     DESCRIPTION
       "Number of times a database of cached previous scanning results was
        consulted and found previous positive virus scanning results for a
-       message with the same body hash."
+       message with the same body hash. Cache is not used any longer since
+       2.7.0."
     ::= { amavisStats 11 5 }
 
 outConnNew OBJECT-TYPE
@@ -1744,7 +1767,7 @@ outConnNew OBJECT-TYPE
     MAX-ACCESS	read-only
     STATUS	current
     DESCRIPTION
-      "Number of new (SMTP or LMTP) TCP session establishments to a MTA."
+      "Number of new (SMTP or LMTP) TCP session establishments to an MTA."
     ::= { amavisStats 11 6 }
 
 outConnQuit OBJECT-TYPE
@@ -1752,7 +1775,7 @@ outConnQuit OBJECT-TYPE
     MAX-ACCESS	read-only
     STATUS	current
     DESCRIPTION
-      "Number of (SMTP or LMTP) TCP sessions to a MTA closed down by
+      "Number of (SMTP or LMTP) TCP sessions to an MTA closed down by
        sending a QUIT command."
     ::= { amavisStats 11 7 }
 
@@ -1761,7 +1784,7 @@ outConnTransact OBJECT-TYPE
     MAX-ACCESS	read-only
     STATUS	current
     DESCRIPTION
-      "Number of transactions to a MTA. The SMTP or LMTP protocol allows
+      "Number of transactions to an MTA. The SMTP or LMTP protocol allows
        transferring more than one mail message during the same session.
        Each MAIL FROM command begins a new SMTP or LMTP transaction."
     ::= { amavisStats 11 8 }
@@ -1771,7 +1794,7 @@ outConnReuseFail OBJECT-TYPE
     MAX-ACCESS	read-only
     STATUS	current
     DESCRIPTION
-      "Amavisd tries to reuse open SMTP or LMTP sessions to a MTA to send
+      "Amavisd tries to reuse open SMTP or LMTP sessions to an MTA to send
        additional mail messages without having to tear down and re-establish
        a session. Before attempting to reuse an open session which hasn't
        been used for some time, amavisd sends a NOOP command to test if
@@ -1785,7 +1808,7 @@ outConnReuseRecent OBJECT-TYPE
     MAX-ACCESS	read-only
     STATUS	current
     DESCRIPTION
-      "Amavisd tries to reuse open SMTP or LMTP sessions to a MTA to send
+      "Amavisd tries to reuse open SMTP or LMTP sessions to an MTA to send
        additional mail messages without having to tear down and re-establish
        a session. The outConnReuseRecent corresponds to the number of
        times an already open and recently used session could be reused."
@@ -1796,7 +1819,7 @@ outConnReuseRefreshed OBJECT-TYPE
     MAX-ACCESS	read-only
     STATUS	current
     DESCRIPTION
-      "Amavisd tries to reuse open SMTP or LMTP sessions to a MTA to send
+      "Amavisd tries to reuse open SMTP or LMTP sessions to an MTA to send
        additional mail messages without having to tear down and re-establish
        a session. Before attempting to reuse an open session which hasn't
        been used for some time, amavisd sends a NOOP command to test if
@@ -2200,6 +2223,763 @@ timeElapsedSpamCheck OBJECT-TYPE
        in units of 0.01 s."
     ::= { amavisStats 16 7 }
 
+userCounter1 OBJECT-TYPE
+    SYNTAX	Counter64
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "A general purpose counter, its semantics is assignable by a user."
+    ::= { amavisStats 17 1 }
+
+userCounter2 OBJECT-TYPE
+    SYNTAX	Counter64
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "A general purpose counter, its semantics is assignable by a user."
+    ::= { amavisStats 17 2 }
+
+userCounter3 OBJECT-TYPE
+    SYNTAX	Counter64
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "A general purpose counter, its semantics is assignable by a user."
+    ::= { amavisStats 17 3 }
+
+userCounter4 OBJECT-TYPE
+    SYNTAX	Counter64
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "A general purpose counter, its semantics is assignable by a user."
+    ::= { amavisStats 17 4 }
+
+userCounter5 OBJECT-TYPE
+    SYNTAX	Counter64
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "A general purpose counter, its semantics is assignable by a user."
+    ::= { amavisStats 17 5 }
+
+userCounter6 OBJECT-TYPE
+    SYNTAX	Counter64
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "A general purpose counter, its semantics is assignable by a user."
+    ::= { amavisStats 17 6 }
+
+userCounter7 OBJECT-TYPE
+    SYNTAX	Counter64
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "A general purpose counter, its semantics is assignable by a user."
+    ::= { amavisStats 17 7 }
+
+userCounter8 OBJECT-TYPE
+    SYNTAX	Counter64
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "A general purpose counter, its semantics is assignable by a user."
+    ::= { amavisStats 17 8 }
+
+userCounter9 OBJECT-TYPE
+    SYNTAX	Counter64
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "A general purpose counter, its semantics is assignable by a user."
+    ::= { amavisStats 17 9 }
+
+userCounter10 OBJECT-TYPE
+    SYNTAX	Counter64
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "A general purpose counter, its semantics is assignable by a user."
+    ::= { amavisStats 17 10 }
+
+userGauge1 OBJECT-TYPE
+    SYNTAX      Gauge32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "A general purpose gauge/integer, its semantics is assignable by a user."
+    ::= { amavisStats 18 1 }
+
+userGauge2 OBJECT-TYPE
+    SYNTAX      Gauge32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "A general purpose gauge/integer, its semantics is assignable by a user."
+    ::= { amavisStats 18 2 }
+
+userGauge3 OBJECT-TYPE
+    SYNTAX      Gauge32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "A general purpose gauge/integer, its semantics is assignable by a user."
+    ::= { amavisStats 18 3 }
+
+userGauge4 OBJECT-TYPE
+    SYNTAX      Gauge32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "A general purpose gauge/integer, its semantics is assignable by a user."
+    ::= { amavisStats 18 4 }
+
+userGauge5 OBJECT-TYPE
+    SYNTAX      Gauge32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "A general purpose gauge/integer, its semantics is assignable by a user."
+    ::= { amavisStats 18 5 }
+
+userGauge6 OBJECT-TYPE
+    SYNTAX      Gauge32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "A general purpose gauge/integer, its semantics is assignable by a user."
+    ::= { amavisStats 18 6 }
+
+userGauge7 OBJECT-TYPE
+    SYNTAX      Gauge32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "A general purpose gauge/integer, its semantics is assignable by a user."
+    ::= { amavisStats 18 7 }
+
+userGauge8 OBJECT-TYPE
+    SYNTAX      Gauge32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "A general purpose gauge/integer, its semantics is assignable by a user."
+    ::= { amavisStats 18 8 }
+
+userGauge9 OBJECT-TYPE
+    SYNTAX      Gauge32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "A general purpose gauge/integer, its semantics is assignable by a user."
+    ::= { amavisStats 18 9 }
+
+userGauge10 OBJECT-TYPE
+    SYNTAX      Gauge32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "A general purpose gauge/integer, its semantics is assignable by a user."
+    ::= { amavisStats 18 10 }
+
+inMsgsStatusAcceptedAll OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd and accepted with
+       a success status code (D_PASS, 2xx), but their forwarding remained
+       the responsibility of an MTA (null delivery_method, typical for
+       a milter setup). A synonym with inMsgsStatusAccepted."
+    ::= { amavisStats 19 1 }
+
+inMsgsStatusAcceptedInbound OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from outside
+       ('originating' flag is off), having at least one recipient local,
+       and accepted with a success status code (D_PASS, 2xx), but their
+       forwarding remained the responsibility of an MTA (null delivery_method,
+       typical for a milter setup)."
+    ::= { amavisStats 19 2 }
+
+inMsgsStatusAcceptedOutbound OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from inside
+       ('originating' flag is on), having at least one recipient nonlocal,
+       and accepted with a success status code (D_PASS, 2xx), but their
+       forwarding remained the responsibility of an MTA (null delivery_method,
+       typical for a milter setup)."
+    ::= { amavisStats 19 3 }
+
+inMsgsStatusAcceptedInternal OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from inside
+       ('originating' flag is on), having at least one recipient local,
+       and accepted with a success status code (D_PASS, 2xx), but their
+       forwarding remained the responsibility of an MTA (null delivery_method,
+       typical for a milter setup)."
+    ::= { amavisStats 19 4 }
+
+inMsgsStatusAcceptedOriginating OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from inside
+       ('originating' flag is on), and accepted with a success status code
+       (D_PASS, 2xx), but their forwarding remained the responsibility of
+       an MTA (null delivery_method, typical for a milter setup)."
+    ::= { amavisStats 19 5 }
+
+inMsgsStatusAcceptedOpenRelay OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from outside
+       ('originating' flag is off), having at least one recipient nonlocal,
+       and accepted with a success status code (D_PASS, 2xx), but their
+       forwarding remained the responsibility of an MTA (null delivery_method,
+       typical for a milter setup). On a properly configured system this
+       count should be zero at all times."
+    ::= { amavisStats 19 6 }
+
+inMsgsStatusRelayedUntaggedAll OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd and accepted with
+       a success status code (D_PASS, 2xx), and forwarded by amavisd
+       without adding a warning to a Subject or to a header section
+       or appending an address extension to recipients. A sum of
+       inMsgsStatusRelayedUntaggedAll and inMsgsStatusRelayedTaggedAll
+       is represented by a counter inMsgsStatusRelayed."
+    ::= { amavisStats 20 1 }
+
+inMsgsStatusRelayedUntaggedInbound OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from outside
+       ('originating' flag is off), having at least one recipient local,
+       accepted with a success status code (D_PASS, 2xx), and forwarded
+       by amavisd, while adding a warning to a Subject or to a header
+       section or appending an address extension to recipients."
+    ::= { amavisStats 20 2 }
+
+inMsgsStatusRelayedUntaggedOutbound OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from inside
+       ('originating' flag is on), having at least one recipient nonlocal,
+       accepted with a success status code (D_PASS, 2xx), and forwarded
+       by amavisd, while adding a warning to a Subject or to a header
+       section or appending an address extension to recipients."
+    ::= { amavisStats 20 3 }
+
+inMsgsStatusRelayedUntaggedInternal OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from inside
+       ('originating' flag is on), having at least one recipient local,
+       accepted with a success status code (D_PASS, 2xx), and forwarded
+       by amavisd."
+    ::= { amavisStats 20 4 }
+
+inMsgsStatusRelayedUntaggedOriginating OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from inside
+       ('originating' flag is on), accepted with a success status code
+       (D_PASS, 2xx), and forwarded by amavisd."
+    ::= { amavisStats 20 5 }
+
+inMsgsStatusRelayedUntaggedOpenRelay OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from outside
+       ('originating' flag is off), having at least one recipient nonlocal,
+       accepted with a success status code (D_PASS, 2xx), and forwarded
+       by amavisd."
+    ::= { amavisStats 20 6 }
+
+inMsgsStatusRelayedTaggedAll OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd and accepted with a success
+       status code (D_PASS, 2xx), and forwarded by amavisd, while adding a
+       warning to a Subject or to a header section or appending an address
+       extension to recipients. A sum of inMsgsStatusRelayedUntaggedAll
+       and nMsgsStatusRelayedTaggedAll is represented by a counter
+       inMsgsStatusRelayed."
+    ::= { amavisStats 21 1 }
+
+inMsgsStatusRelayedTaggedInbound OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from outside
+       ('originating' flag is off), having at least one recipient local,
+       accepted with a success status code (D_PASS, 2xx), and forwarded
+       by amavisd, while adding a warning to a Subject or to a header
+       section or appending an address extension to recipients."
+    ::= { amavisStats 21 2 }
+
+inMsgsStatusRelayedTaggedOutbound OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from inside
+       ('originating' flag is on), having at least one recipient nonlocal,
+       accepted with a success status code (D_PASS, 2xx), and forwarded
+       by amavisd, while adding a warning to a Subject or to a header
+       section or appending an address extension to recipients."
+    ::= { amavisStats 21 3 }
+
+inMsgsStatusRelayedTaggedInternal OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from inside
+       ('originating' flag is on), having at least one recipient local,
+       accepted with a success status code (D_PASS, 2xx), and forwarded
+       by amavisd, while adding a warning to a Subject or to a header
+       section or appending an address extension to recipients."
+    ::= { amavisStats 21 4 }
+
+inMsgsStatusRelayedTaggedOriginating OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from inside
+       ('originating' flag is on), accepted with a success status code
+       (D_PASS, 2xx), and forwarded by amavisd, while adding a warning to
+       a Subject or to a header section or appending an address extension
+       to recipients."
+    ::= { amavisStats 21 5 }
+
+inMsgsStatusRelayedTaggedOpenRelay OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from outside
+       ('originating' flag is off), having at least one recipient nonlocal,
+       accepted with a success status code (D_PASS, 2xx), and forwarded
+       by amavisd, while adding a warning to a Subject or to a header
+       section or appending an address extension to recipients."
+    ::= { amavisStats 21 6 }
+
+inMsgsStatusDiscardedAll OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received but discarded by amavisd with a
+       success status code (2xx), not forwarded, and no delivery status
+       notification was sent. Effectively a mail message was lost. It is
+       a result of a D_DISCARD setting for all recipients of a message.
+       Note that quarantining uses independent settings, so a message
+       may or may not have been quarantined.
+       A synonym with inMsgsStatusDiscarded."
+    ::= { amavisStats 22 1 }
+
+inMsgsStatusDiscardedInbound OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from outside
+       ('originating' flag is off), having at least one recipient local,
+       but discarded by amavisd with a success status code (2xx),
+       not forwarded, and no delivery status notification was sent.
+       Effectively a mail message was lost. A message may or may not
+       have been quarantined."
+    ::= { amavisStats 22 2 }
+
+inMsgsStatusDiscardedOutbound OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from inside
+       ('originating' flag is on), having at least one recipient nonlocal,
+       but discarded by amavisd with a success status code (2xx),
+       not forwarded, and no delivery status notification was sent.
+       Effectively a mail message was lost. A message may or may not
+       have been quarantined."
+    ::= { amavisStats 22 3 }
+
+inMsgsStatusDiscardedInternal OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from inside
+       ('originating' flag is on), having at least one recipient local,
+       but discarded by amavisd with a success status code (2xx),
+       not forwarded, and no delivery status notification was sent.
+       Effectively a mail message was lost. A message may or may not
+       have been quarantined."
+    ::= { amavisStats 22 4 }
+
+inMsgsStatusDiscardedOriginating OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving
+       from inside ('originating' flag is on),
+       but discarded by amavisd with a success status code (2xx),
+       not forwarded, and no delivery status notification was sent.
+       Effectively a mail message was lost. A message may or may not
+       have been quarantined."
+    ::= { amavisStats 22 5 }
+
+inMsgsStatusDiscardedOpenRelay OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from outside
+       ('originating' flag is off), having at least one recipient nonlocal,
+       but discarded by amavisd with a success status code (2xx),
+       not forwarded, and no delivery status notification was sent.
+       Effectively a mail message was lost. A message may or may not
+       have been quarantined."
+    ::= { amavisStats 22 6 }
+
+inMsgsStatusNoBounceAll OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received but discarded by amavisd with a
+       success status code (2xx), not forwarded, and no delivery status
+       notification was sent. Effectively a mail message was lost. It is
+       a result of a D_BOUNCE setting for all recipients of a message
+       but sending a DSN was suppressed (e.g. high spam score, infected).
+       In other words, D_BOUNCE was converted into a D_DISCARD for this
+       message. Note that quarantining uses independent settings, so a
+       message may or may not have been quarantined.
+       A synonym with inMsgsStatusNoBounce."
+    ::= { amavisStats 23 1 }
+
+inMsgsStatusNoBounceInbound OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from outside
+       ('originating' flag is off), having at least one recipient local,
+       but discarded by amavisd with a success status code (2xx),
+       not forwarded, a delivery status notification was suppressed.
+       Effectively a mail message was lost. A message may or may not
+       have been quarantined."
+    ::= { amavisStats 23 2 }
+
+inMsgsStatusNoBounceOutbound OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from inside
+       ('originating' flag is on), having at least one recipient nonlocal,
+       but discarded by amavisd with a success status code (2xx),
+       not forwarded, a delivery status notification was suppressed.
+       Effectively a mail message was lost. A message may or may not
+       have been quarantined."
+    ::= { amavisStats 23 3 }
+
+inMsgsStatusNoBounceInternal OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from inside
+       ('originating' flag is on), having at least one recipient local,
+       but discarded by amavisd with a success status code (2xx),
+       not forwarded, a delivery status notification was suppressed.
+       Effectively a mail message was lost. A message may or may not
+       have been quarantined."
+    ::= { amavisStats 23 4 }
+
+inMsgsStatusNoBounceOriginating OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving
+       from inside ('originating' flag is on),
+       but discarded by amavisd with a success status code (2xx),
+       not forwarded, a delivery status notification was suppressed.
+       Effectively a mail message was lost. A message may or may not
+       have been quarantined."
+    ::= { amavisStats 23 5 }
+
+inMsgsStatusNoBounceOpenRelay OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from outside
+       ('originating' flag is off), having at least one recipient nonlocal,
+       but discarded by amavisd with a success status code (2xx),
+       not forwarded, a delivery status notification was suppressed.
+       Effectively a mail message was lost. A message may or may not
+       have been quarantined."
+    ::= { amavisStats 23 6 }
+
+inMsgsStatusBouncedAll OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd with a success status
+       code (2xx), but not forwarded, and a delivery status notification
+       was sent to a sender of a message informing him of a reason for
+       blocking a message. It is a result of a D_BOUNCE setting for all
+       recipients of a message. Note that quarantining uses independent
+       settings, so a message may or may not have been quarantined.
+       A synonym with inMsgsStatusBounced."
+    ::= { amavisStats 24 1 }
+
+inMsgsStatusBouncedInbound OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from outside
+       ('originating' flag is off), having at least one recipient local,
+       confirmed by a success status code (2xx) but not forwarded, and
+       a delivery status notification was sent to a sender of a message
+       informing him of a reason for non-delivery. A message may or may not
+       have been quarantined."
+    ::= { amavisStats 24 2 }
+
+inMsgsStatusBouncedOutbound OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from inside
+       ('originating' flag is on), having at least one recipient nonlocal,
+       confirmed by a success status code (2xx) but not forwarded, and
+       a delivery status notification was sent to a sender of a message
+       informing him of a reason for non-delivery. A message may or may not
+       have been quarantined."
+    ::= { amavisStats 24 3 }
+
+inMsgsStatusBouncedInternal OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from inside
+       ('originating' flag is on), having at least one recipient local,
+       confirmed by a success status code (2xx) but not forwarded, and
+       a delivery status notification was sent to a sender of a message
+       informing him of a reason for non-delivery. A message may or may not
+       have been quarantined."
+    ::= { amavisStats 24 4 }
+
+inMsgsStatusBouncedOriginating OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving
+       from inside ('originating' flag is on),
+       confirmed by a success status code (2xx) but not forwarded, and
+       a delivery status notification was sent to a sender of a message
+       informing him of a reason for non-delivery. A message may or may not
+       have been quarantined."
+    ::= { amavisStats 24 5 }
+
+inMsgsStatusBouncedOpenRelay OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from outside
+       ('originating' flag is off), having at least one recipient nonlocal,
+       confirmed by a success status code (2xx) but not forwarded, and
+       a delivery status notification was sent to a sender of a message
+       informing him of a reason for non-delivery. A message may or may not
+       have been quarantined."
+    ::= { amavisStats 24 6 }
+
+inMsgsStatusRejectedAll OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages rejected by amavisd with a reject status
+       code (5xx), not forwarded by amavisd, and no delivery status
+       notification was sent. A duty of notifying the sender of a reject
+       is delegated back to the sending MTA. Note that quarantining uses
+       independent settings, so a message may or may not have been
+       quarantined. A synonym with inMsgsStatusRejected."
+    ::= { amavisStats 25 1 }
+
+inMsgsStatusRejectedInbound OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from outside
+       ('originating' flag is off), having at least one recipient local,
+       and rejected by amavisd with a reject status code (5xx),
+       not forwarded by amavisd, and no delivery status notification
+       was sent. A message may or may not have been quarantined."
+    ::= { amavisStats 25 2 }
+
+inMsgsStatusRejectedOutbound OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from inside
+       ('originating' flag is on), having at least one recipient nonlocal,
+       and rejected by amavisd with a reject status code (5xx),
+       not forwarded by amavisd, and no delivery status notification
+       was sent. A message may or may not have been quarantined."
+    ::= { amavisStats 25 3 }
+
+inMsgsStatusRejectedInternal OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from inside
+       ('originating' flag is on), having at least one recipient local,
+       and rejected by amavisd with a reject status code (5xx),
+       not forwarded by amavisd, and no delivery status notification
+       was sent. A message may or may not have been quarantined."
+    ::= { amavisStats 25 4 }
+
+inMsgsStatusRejectedOriginating OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving
+       from inside ('originating' flag is on),
+       and rejected by amavisd with a reject status code (5xx),
+       not forwarded by amavisd, and no delivery status notification
+       was sent. A message may or may not have been quarantined."
+    ::= { amavisStats 25 5 }
+
+inMsgsStatusRejectedOpenRelay OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from outside
+       ('originating' flag is off), having at least one recipient nonlocal,
+       and rejected by amavisd with a reject status code (5xx),
+       not forwarded by amavisd, and no delivery status notification
+       was sent. A message may or may not have been quarantined."
+    ::= { amavisStats 25 6 }
+
+inMsgsStatusTempFailedAll OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages whose reception resulted in a temporary
+       failure status code (4xx) being send by amavisd back to MTA.
+       A message was not forwarded by amavisd, and no delivery status
+       notification was sent. A message stayed in an MTA queue for future
+       attempts at delivery. A synonym with inMsgsStatusTempFailed."
+    ::= { amavisStats 26 1 }
+
+inMsgsStatusTempFailedInbound OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from outside
+       ('originating' flag is off), having at least one recipient local,
+       whose reception resulted in a temporary failure status code (4xx).
+       A message was not forwarded by amavisd, and no delivery status
+       notification was sent."
+    ::= { amavisStats 26 2 }
+
+inMsgsStatusTempFailedOutbound OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from inside
+       ('originating' flag is on), having at least one recipient nonlocal,
+       whose reception resulted in a temporary failure status code (4xx).
+       A message was not forwarded by amavisd, and no delivery status
+       notification was sent."
+    ::= { amavisStats 26 3 }
+
+inMsgsStatusTempFailedInternal OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from inside
+       ('originating' flag is on), having at least one recipient local,
+       whose reception resulted in a temporary failure status code (4xx).
+       A message was not forwarded by amavisd, and no delivery status
+       notification was sent."
+    ::= { amavisStats 26 4 }
+
+inMsgsStatusTempFailedOriginating OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving
+       from inside ('originating' flag is on),
+       whose reception resulted in a temporary failure status code (4xx).
+       A message was not forwarded by amavisd, and no delivery status
+       notification was sent."
+    ::= { amavisStats 26 5 }
+
+inMsgsStatusTempFailedOpenRelay OBJECT-TYPE
+    SYNTAX	Counter32
+    MAX-ACCESS	read-only
+    STATUS	current
+    DESCRIPTION
+      "Number of mail messages received by amavisd arriving from outside
+       ('originating' flag is off), having at least one recipient nonlocal,
+       whose reception resulted in a temporary failure status code (4xx).
+       A message was not forwarded by amavisd, and no delivery status
+       notification was sent."
+    ::= { amavisStats 26 6 }
+
 
 -- ==================
 -- amavisProc section
@@ -2245,7 +3025,7 @@ procBusyTransfer OBJECT-TYPE
     STATUS      current
     DESCRIPTION
       "Number of currently registered and busy amavisd child processes
-       transferring data from or to a MTA."
+       transferring data from or to an MTA."
     ::= { amavisProc 1 5 }
 
 procBusyDecode OBJECT-TYPE
@@ -2492,7 +3272,7 @@ mtaQueueEntriesMaildrop OBJECT-TYPE
     MAX-ACCESS  read-only
     STATUS      current
     DESCRIPTION
-      "Number of files under a MTA directory $queue_directory/maildrop."
+      "Number of files under an MTA directory $queue_directory/maildrop."
     ::= { amavisMta 1 1 }
 
 mtaQueueEntriesIncoming OBJECT-TYPE
@@ -2500,7 +3280,7 @@ mtaQueueEntriesIncoming OBJECT-TYPE
     MAX-ACCESS  read-only
     STATUS      current
     DESCRIPTION
-      "Number of files under a MTA directory $queue_directory/incoming"
+      "Number of files under an MTA directory $queue_directory/incoming"
     ::= { amavisMta 1 2 }
 
 mtaQueueEntriesActive OBJECT-TYPE
@@ -2508,7 +3288,7 @@ mtaQueueEntriesActive OBJECT-TYPE
     MAX-ACCESS  read-only
     STATUS      current
     DESCRIPTION
-      "Number of files under a MTA directory $queue_directory/active"
+      "Number of files under an MTA directory $queue_directory/active"
     ::= { amavisMta 1 3 }
 
 mtaQueueEntriesDeferred OBJECT-TYPE
@@ -2516,7 +3296,7 @@ mtaQueueEntriesDeferred OBJECT-TYPE
     MAX-ACCESS  read-only
     STATUS      current
     DESCRIPTION
-      "Number of files under a MTA directory $queue_directory/deferred"
+      "Number of files under an MTA directory $queue_directory/deferred"
     ::= { amavisMta 1 4 }
 
 END

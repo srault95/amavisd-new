@@ -13,7 +13,6 @@ README_FILES/amavisd-new-docs.html  a more detailed documentation on selected
 amavisd          the amavisd-new daemon (should go into /usr/local/sbin/)
 amavisd.conf     its configuration file (should go into /etc/)
 amavisd.conf-default  lists all configuration variables with their defaults
-amavisd.conf-sample   traditional-style commented amavisd.conf with examples
 amavisd-custom.conf   example custom hooks, to be invoked from amavisd.conf
 
 amavisd-agent    a demo program to access and display SNMP-like counters
@@ -23,6 +22,9 @@ amavisd-nanny    a program to show the status and keep an eye on the health
                  of child processes in amavisd-new (experimental)
 
 amavisd-release  a program to request releasing a message from a quarantine
+
+amavisd-submit   a simple program to pass an email message to amavisd daemon
+                 and to adjust its exit status according to a response received
 
 p0f-analyzer.pl  a program to interface amavisd with a p0f utility
 
@@ -35,10 +37,16 @@ AMAVIS-MIB.txt   The MIB module (SNMP Management information base)
                  describing amavisd-new statistics and health information.
                  Useful to a SNMP client program such as snmpwalk or Cacti;
 
+amavisd-signer   A DKIM signing service daemon for amavisd. It uses an AM.PDP
+                 protocol lookalike to receive a request from amavisd and
+                 provides two services: choosing a signing key, and signing
+                 a message digest with a chosen DKIM private key.
+                 Amavisd uses this signing service configured through
+                 a $dkim_signing_service setting if it is nonempty;
+
 JpegTester.pm    a Perl module needed if 'check-jpeg' AV checker entry
                  is enabled; to be placed in Perl include paths if needed;
 
-helper-progs/    contains amavis.c and amavis-milter.c helpers (sendmail only)
 test-messages/   contains sample/test mail messages
 TODO             missing features, wish list, ...
 

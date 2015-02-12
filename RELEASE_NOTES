@@ -1,4 +1,2006 @@
 ---------------------------------------------------------------------------
+                                                               July 1, 2011
+amavisd-new-2.7.0 release notes
+
+Contents:
+  NEW FEATURES SUMMARY
+  GENERAL
+  COMPATIBILITY WITH 2.6.4 / 2.6.5 / 2.6.6
+  BUG FIXES SINCE 2.6.6
+  BUG FIXES SINCE 2.6.5
+  BUG FIXES SINCE 2.6.4
+  NEW FEATURES
+  OPTIMIZATIONS
+  OTHER
+  CLEANING
+
+
+NEW FEATURES SUMMARY
+
+- significant improvements affecting a pre-queue content filtering setup
+  (time limiting, warm/flying restart, ...) - requires Postfix 2.7.0 and
+  SpamAssassin 3.3.0, or later;
+
+- new daemon amavisd-signer makes it possible to sign mail with DKIM
+  signatures without requiring amavisd process to have access to private
+  signing keys;
+
+- added support for the Sophos-SSSP, Avira SAVAPI and ClamAV clamd streaming
+  protocols allows amavisd to communicate with these antivirus solutions;
+
+- allow specifying multiple (fail-over) back-end mailers for resubmission
+  of messages from amavisd back to MTA;
+
+- support for Postfix 2.8.0 XFORWARD IDENT, passes a local message identifier
+  (queue id) downstream to a post-queue content filter and back to Postfix;
+
+- speedup in data transfer rate on receiving large mail via SMTP/LMTP
+  sessions by a factor of 3.9 for plain text sessions, and by a factor
+  of 11 for encrypted (TLS) sessions;
+
+- recognize and insert header fields as prepared by SpamAssassin 3.3.0
+  or later through its 'add_header' configuration option;
+
+- a new setting allows a forward_method to be chosen based on a message
+  content type and/or recipient address; this may be useful for outgoing
+  mail routing purposes or to implement sender reputation schemes;
+
+- per-recipient (or per- policy bank) SpamAssassin configuration files or
+  SQL configuration sets are supported (@sa_userconf_maps), and per-recipient
+  SQL Bayes database usernames (@sa_username_maps);
+
+- new macros: client_helo, client_addr, client_port, client_addr_port,
+  mime2utf8, rusage, ADDEDHEADERHAM, ADDEDHEADERSPAM, banned_parts_as_attr,
+  actions_performed, new arguments to macros dkim, header_field, HEADER,
+  YESNO and YESNOCAPS;
+
+- @listen_sockets setting offers a unified configuration of listening
+  sockets; it may be configured directly, or the traditional way: the
+  $inet_socket_port, $unix_socketname and $inet_socket_bind just add their
+  entries to the @listen_sockets list;
+
+- lists of lookup tables (the @*_maps variables) can now contain
+  explicit SQL and LDAP lookup objects as their elements, instead of
+  (or in addition to) the implied SQL and LDAP lookups;
+
+- a new configuration variable @virus_name_to_policy_bank_maps allows
+  loading of policy banks based on a virus name;
+
+- a new configuration variable $mail_id_size_bits allows setting the size
+  of randomly generated mail_id and secret_id codes;
+
+- a new configuration variable $sql_store_info_for_all_msgs allows storing
+  information on mail messages selectively just for quarantined messages;
+
+- added SNMP counters InMsgsStatus* which combine the final mail checking
+  status with a direction of a mail flow;
+
+- optional transparent archival quarantine, retaining envelope recipient
+  addresses on delivery to a dedicated SMTP server;
+
+
+GENERAL
+
+With a synergy of four solutions, using amavisd-new in a pre-queue
+filtering setup became a sensible / better behaved solution:
+
+- the "smtpd_proxy_options=speed_adjust" Postfix option, available since
+  Postfix 2.7.0 (20091101), improves decoupling between SMTP clients
+  and a content filter in a proxy setup, reducing the number of content
+  filtering processes needed for the same mail load. With this option
+  turned on, a Postfix SMTP server receives the entire message before
+  connecting to a before-queue content filter;
+
+- a master_deadline option and its API equivalent, available in SpamAssassin
+  since version 3.3.0, allows for time limiting on lengthy rules checking,
+  while still providing results when a time limit is exceeded; this makes
+  it more suitable for time-sensitive setups like a pre-queue filtering setup;
+
+- reworked sub-task time limiting in amavisd, along with its counterpart
+  solution in SpamAssassin, makes it better suited to a real-time nature
+  of pre-queue filtering setups, where one has no control over how long
+  SMTP clients are willing to wait at the data-end stage;
+
+- a re-purposed command line option 'reload' now does a warm restart,
+  keeping sockets available to an MTA client at all times, thus reducing
+  a chance that an MTA would even notice a content filter's warm restart.
+
+Provided that required minimal versions of Postfix and SpamAssassin are
+available, on can try amavisd in a Postfix proxy setup. The $child_timeout
+setting needs to be radically reduced in this setup, matching the longest
+time most SMTP clients are willing to wait, and must be less than Postfix
+is willing to wait (smtpd_proxy_timeout), which by default is 100 s.
+A sensible value is somewhat less then a minute (e.g. 45 seconds). Even
+though RFC 5321 (section 4.5.3.2.6) recommends that clients SHOULD be
+willing to wait for 10 minutes at data-end stage, it is not uncommon
+that this recommendation is not adhered to.
+
+Note that a pre-queue filtering setup (along with its benefits) still
+has all its drawbacks, like the need for more filtering processes to
+accommodate mail arrival rate peaks (instead of averages), and much shorter
+and unpredictable (client-dependent) time limits. The new features of the
+three products only rise the thresholds where trouble starts, and make
+the whole setup better behaved.
+
+
+COMPATIBILITY WITH 2.6.4 / 2.6.5 / 2.6.5
+
+- due to popular demand to reduce undesired and unintentional backscatter,
+  defaults for the settings $final_spam_destiny and $final_banned_destiny
+  were changed. Previously they both defaulted to D_BOUNCE, new defaults
+  are:
+
+    $final_virus_destiny      = D_DISCARD;
+    $final_banned_destiny     = D_DISCARD;
+    $final_spam_destiny       = D_PASS;
+    $final_bad_header_destiny = D_PASS;
+
+  Please adjust to will. If you have these settings configured explicitly
+  in a configuration file, this change of a default value does not affect
+  you.
+
+  For a pre-queue content filtering setup (smtp proxy or milter) a suitable
+  value is D_REJECT. For a post-queue filtering setup preferred choices
+  are to tag-and-deliver (D_PASS), or to drop (D_DISCARD) and quarantine.
+
+  It is still possible to use a D_BOUNCE setting, but please restrict
+  and monitor your backscatter. Due to a default setting of
+  @viruses_that_fake_sender_maps the backscatter on viruses has been
+  fully suppressed since amavisd-new-20021116 even with a D_BOUNCE.
+  Backscatter on high-scoring spam has been controllable since
+  amavisd-new-20030616-p8 by a family of settings
+  @spam(_crediblefrom)_dsn_cutoff_level(_bysender)_maps,
+
+- several ancient configuration settings were removed or deactivated,
+  see section CLEANING below;
+
+- a command line option 'reload' has been renamed to 'restart',
+  corresponding to a shutdown followed by a normal (cold) start;
+  while a command line option 'reload' has been re-purposed to function
+  as a warm/flying restart. See below for details. Protection of some
+  files may need to be examined (configurations files and DKIM private
+  keys should be readable for group vscan/amavis and not writable by
+  UID vscan/amavis);
+
+- a failure of all virus scanners no longer automatically tempfails the
+  operation, but flags a message with a CC_UNCHECKED contents category
+  (just like a failure of decoders/dearchivers), and allows the usual
+  controls (*_destiny, *_quarantine_*) to be used to choose behaviour.
+  The $virus_scanners_failure_is_fatal=1 reverts to the previous behaviour,
+  see below; 
+
+- a default value of $hdr_encoding and $bdy_encoding has been changed
+  from 'iso-8859-1' to 'UTF-8' which better suits reporting of banned parts;
+
+- default encoding for reading text templates from the tail of a file
+  'amavisd' has been changed to 'utf8', which allows replacing a default
+  text by non-ascii Unicode templates, encoded as UTF-8;
+
+- when using SQL for logging/penpals: three fields need to be added
+  to a table msgrcpt: msgrcpt.content, msgrcpt.rseqnum, msgrcpt.is_local,
+  and one to a table msgs: msgs.originating .
+
+  Semantics of msgrcpt.content is similar to msgs.content, but reflects
+  individual recipient's settings (e.g. when a message is both banned and
+  spam, a recipient with banning tests disabled will see a message as spam,
+  while other recipient of the same message will consider it banned).
+  The added field may also simplify queries by third party applications.
+
+  The field msgrcpt.rseqnum uniquely identifies/enumerates recipients within
+  each message, typically by assigning them sequential numbers starting
+  with 1. The only purpose of this field is to make it possible to define
+  a primary key for the table msgrcpt, which may be needed for some
+  clustering/partitioning purposes. Amavisd itself does not require a
+  primary key on this table.
+
+  The field msgrcpt.is_local should be considered a boolean, its value can be:
+    'Y' ... yes, recipient is local, i.e. matches @local_domains_maps
+    'N' ... no,  recipient does not match @local_domains_maps
+    ' ' ... unknown - this is a default field value; amavisd always sets
+            this field to either 'Y' or 'N';
+
+  The field msgs.originating should be considered a boolean, its value can be:
+    'Y' ... yes, message is originating from inside or from an authenticated
+            roaming sender (the flag $originating was true);
+    'N' ... no, message is not submitted by our user ($originating was false);
+    ' ' ... unknown - this is a default field value; amavisd always sets
+            this field to either 'Y' or 'N', reflecting the $originating flag;
+
+  A combination of msgs.originating and msgrcpt.is_local tells a direction
+  a message is traveling:
+    originating is_local
+        N        N    open relay (probably misconfigured @local_domains_maps
+                                  or $originating flag not set)
+        N        Y    inbound message
+        Y        N    outbound message
+        Y        Y    internal message (inside or authenticated -> inside)
+  Note that a direction is a per-recipient property, a multi-recipient
+  message can be outbound for some recipients and internal for others
+  at the same time.
+
+  The following SQL directives can be used to add these new fields:
+    ALTER TABLE msgrcpt ADD rseqnum     integer  DEFAULT 0   NOT NULL;
+    ALTER TABLE msgrcpt ADD content     char(1)  DEFAULT ' ' NOT NULL
+    ALTER TABLE msgrcpt ADD is_local    char(1)  DEFAULT ' ' NOT NULL;
+    ALTER TABLE msgs    ADD originating char(1)  DEFAULT ' ' NOT NULL;
+
+  If a primary key on table msgrcpt is needed for some reason,
+  try something like the following:
+  *MySQL:
+     UPDATE msgrcpt SET rseqnum=1+floor(999999999*rand()) WHERE rseqnum=0;
+     ALTER TABLE msgrcpt ADD PRIMARY KEY (partition_tag,mail_id,rseqnum);
+  *PostgreSQL:
+     UPDATE msgrcpt SET rseqnum=1+floor(999999999*random()) WHERE rseqnum=0;
+     CREATE UNIQUE INDEX msgrcpt_idx_primary
+       ON msgrcpt (partition_tag,mail_id,rseqnum);
+
+  If keeping a possibly customized copy of %sql_clause in a configuration
+  file, entries 'ins_rcp' and 'upd_msg' will need to be adjusted accordingly.
+
+  To facilitate transition from 2.6.4 to 2.7.0, it is possible to configure
+  amavisd 2.7.0 to supply with SELECT and INSERT clauses a subset of
+  parameters as used by 2.6.4. A configuration setting $sql_schema_version
+  controls this backwards compatibility. Its default value is 2.007000 .
+  By setting it to 2.006004 a subset of parameters as was used with a
+  version 2.6.4 is selected.  SQL clauses in $sql_clause{'upd_msg'}
+  and $sql_clause{'ins_rcp'} need to be adjusted according to a chosen
+  version of actual parameters. Below is an example of a required setting
+  compatible with both amavisd-new 2.6.4 and 2.7.0, which lets amavisd 2.7.0
+  use an SQL schema of 2.6.4, which lacks the four newly added fields:
+
+  our($sql_schema_version)  if $myversion_id_numeric < 2.007000;
+  $sql_schema_version = 2.006004;
+  $sql_clause{'upd_msg'} =
+    'UPDATE msgs SET content=?, quar_type=?, quar_loc=?, dsn_sent=?,'.
+    ' spam_level=?, message_id=?, from_addr=?, subject=?, client_addr=?'.
+    ' WHERE partition_tag=? AND mail_id=?';
+  $sql_clause{'ins_rcp'} =
+    'INSERT INTO msgrcpt (partition_tag, mail_id, rid,'.
+    ' ds, rs, bl, wl, bspam_level, smtp_resp) VALUES (?,?,?,?,?,?,?,?,?)';
+
+  Note that this is only provided to facilitate transition. Please add
+  the new fields on an opportunity, then remove the above settings from
+  your configuration file and restart amavisd.
+
+- SQL fields msgs.content and msgrcpt.content used to encode a content
+  type CC_SPAMMY as 's', and CC_MTA as 't'. With default case-insensitive
+  queries on a data type char it was not possible to distinguish
+  between lowercase 's' (= CC_SPAMMY) and uppercase 'S' (= CC_SPAM), so
+  the CC_SPAMMY is now encoded as 'Y', and CC_MTA as 'T' (just in case).
+  Please adjust your management tools if necessary.
+
+- please check SQL data types on fields msgs.mail_id, msgs.secret_id,
+  msgrcpt.mail_id and quarantine.mail_id in existing databases, these must
+  be treated case-insensitively - see details further down, please search
+  further down for "must be treated case-insensitively";
+
+- SQL clause $sql_clause{'sel_quar'} no longer uses a coalesce() function
+  (introduced in amavisd-new-2.6.2) which attempted to deal with NULL
+  quarantine.partition_tag or with undefined $partition_tag, when releasing
+  a message from a SQL quarantine - but payed the price of not using index.
+  If releasing from a SQL quarantine is desired, either ensure there are
+  no (old) records in a table 'quarantine' with a NULL partition_tag
+  (e.g. replace such fields with a 0, and don't leave $partition_tag
+  undefined in amavisd.conf - set it to 0 for example when partitioning
+  is not needed), or assign a former clause to $sql_clause{'sel_quar'}
+  in amavisd.conf :
+
+  $sql_clause{sel_quar} =
+    'SELECT mail_text FROM quarantine'.
+    ' WHERE coalesce(partition_tag,0)=coalesce(?,0) AND mail_id=?'.
+    ' ORDER BY chunk_ind';
+
+  Thanks to Michael Scheidell and Thomas Gelf for pointing out the
+  inefficiency.
+
+- if using Petr Rehor's amavisd-milter to call amavisd, please update it
+  to version 1.5.0 (or later), as earlier versions did not accept a new
+  attribute 'log_id', which is now included in a response from amavisd;
+
+- a sample configuration file amavisd.conf-sample was removed from the
+  package - it hasn't been seriously updated for years, and it contained
+  lots of aged or distracting information;
+
+- old helper programs amavis.c and amavis-milter.c are no longer distributed
+  with the package, along with the whole helper-progs subdirectory.
+  As a milter client please use the more modern 'amavisd-milter' package by
+  Petr Rehor, available at http://sourceforge.net/projects/amavisd-milter/
+
+- old AM.CL protocol is no longer supported; it was provided for
+  compatibility with versions of AMaViS pre-dating amavisd-new, along with
+  its client programs: old helper programs amavis.c and amavis-milter.c.
+  Handling of release requests and milter requests through AM.PDP protocol
+  remains unaffected;
+
+- a sample AM.PDP client program for mail submission to amavisd which was
+  previously distributed as 'helper-progs/amavis.pl' has been renamed to
+  'amavisd-submit' and slightly modernized. It provides partial functional
+  compatibility with a very early AMaViS client program amavis.c, which
+  takes a message on stdin, copies it to a temporary file, passes its
+  name to amavisd daemon using AM.PDP protocol, and based on the response
+  adjusts its exit status value so that an invoking script or program may
+  decide whether to deliver the mail message or not;
+
+- mail_id and secret_id are now composed of characters from a character set
+  [ A-Z, a-z, 0-9, -, _ ] instead of [ A-Z, a-z, 0-9, +, - ]  (i.e. now uses
+  underline instead of a plus) to conform to RFC 4648 base64url specification,
+  thus making it potentially easier to specify an id in various GUI/API
+  interfaces without a need for quoting a plus. The change is also reflected
+  in a choice of quarantine file names. Compatibility with releasing of old
+  quarantined messages is retained;
+
+- relationship between mail_id and secret_id has changed and is now:
+    mail_id = encode_base64(md5(decode_base64(secret_id)))
+    (i.e. md5 is applied to 9 raw bytes of a secret id)
+  while previously it was:
+    mail_id = encode_base64(md5(secret_id))
+    (i.e. md5 was applied to 12 base64 characters of a secret id)
+  Releasing from a quarantine still understands old relationship and old
+  base64 encoding character set for compatibility, so no problems are
+  expected even when releasing a mix of old and new quarantined messages.
+  The change may potentially affect some third party application.
+
+- caching of virus and spam check results based on a mail body hash has been
+  removed. It was very beneficial years ago when virus storms were common
+  and spam was not personalized. Nowadays (2010) the feature barely pays
+  for itself (savings are comparable to additional processing needed), and
+  is incompatible with per-recipient spam checks (as introduced with this
+  version), and incompatible with DKIM verification on locally originating
+  and signed mail being returned from a mailing list. Rather than trying
+  to fit a square peg into a round hole, the feature is now dropped.
+
+  Associated configuration variables are still declared for compatibility,
+  but have no effect:
+    $enable_global_cache,
+    $virus_check_negative_ttl, $virus_check_positive_ttl,
+    $spam_check_negative_ttl, $spam_check_positive_ttl
+
+- a default value for $lock_file is now undefined instead of the former
+  default value "$helpers_home/amavisd.lock";  an undefined value lets
+  Net::Server choose a suitable temporary file (POSIX::tmpnam) for 'flock'
+  serialization on socket accept();
+
+- updated (rarely used) AV entries 'Sophos SAVI', 'Mail::ClamAV'
+  and 'av_smtp' in an incompatible way (they now use ask_daemon interface
+  instead of a dedicated subroutine), please update your AV entries;
+
+- internal: spam_level() and spam_tests() are no longer properties of a
+  message, but are now a property of each recipient, which makes possible
+  per-recipient spam checking settings (e.g. rules, bayes username, ...);
+
+- internal: a delivery_method() is no longer a property of a message, but
+  is now a property of each recipient, which makes per-recipient forwarding
+  possible;
+
+- internal: a load_policy_bank() takes one additional argument $msginfo,
+  which is passed on to any policy bank's ACTION routine if a policy bank
+  has one;
+
+
+BUG FIXES SINCE 2.6.6
+
+- take a more cautious approach on keeping evidence on an SMTP session
+  transaction state when feeding a message back to MTA. Under certain
+  abnormal circumstances an MTA could respond to end-of-data with a temporary
+  failure but retain an active transaction state, while amavisd would assume
+  the transaction was closed, leading to a 'MAIL transaction in progress'
+  failure on the next message using the same cached SMTP session.
+  Now amavisd considers a transaction state to be unknown when there is any
+  doubt and closes a session instead of caching it, unless the transaction
+  is reliably known to be closed. Problem reported by Ralf Hildebrandt.
+
+
+BUG FIXES SINCE 2.6.5
+
+All bug fixes that were developed during a 2.7.0 developement cycle
+have been backported to the 2.6 branch and released as 2.6.6.
+They are all documented in release notes of the 2.6.6 release.
+
+
+BUG FIXES SINCE 2.6.4
+
+All bug fixes and some compatibility measures that were developed during
+a 2.7.0 developement cycle have been backported to the 2.6 branch and
+released as 2.6.5. They are all documented in release notes of the
+2.6.5 release.
+
+
+NEW FEATURES
+
+- a command line option 'reload' has been renamed to 'restart', while keeping
+  its semantics: to stop a currently running daemon, and then promote a
+  process to become a new daemon. This makes a complete and independent
+  restart with all its benefits: can start a chrooted daemon, can access
+  config files or DKIM signing keys accessible only to root, can open
+  sockets/ports otherwise restricted to root, can change inet and unix
+  socket locations, their bindings and port numbers. It will also reset
+  SNMP counters in a database, if it is enabled.
+
+  A downside is that during a restart existing sockets are closed, so
+  until new sockets are re-established an MTA client experiences connection
+  failures, which is particularly disruptive in a pre-queue MTA setup.
+
+- a command line option 'reload' has been re-purposed to function as a
+  warm restart: it now sends a HUP signal to a running daemon, then exits.
+  A running daemon upon receiving a HUP signal will clone its sockets,
+  clear their 'close-on-exec' flag, then restart itself through exec().
+  A reborn daemon inherits open sockets, does a normal startup (loading
+  perl modules and config files), then reassociates inherited sockets
+  with configured inet and Unix socket names, which is why these must
+  not be changed in a configuration file between reloads.
+
+  Sockets remain open and available to clients during the whole warm-restart
+  period, requests are queued by kernel (queue size is configurable through
+  $listen_queue_size, defaulting to SOMAXCONN, or there may not be any
+  queues at all when an IP stack is using SYN cookies), so apart from a
+  delay in connection establishment, an MTA client will not notice a restart
+  as long as the IP stack is willing to accept new sessions (as controlled
+  by listen queue size or SYN cookies). This makes the reloading method
+  particularly suitable for pre-queue filter setups.
+
+  A downside is that a HUP-ed daemon has already dropped root privileges
+  during its first start, so it must restart as a nonprivileged user
+  (typically 'vscan' or 'amavis'), which rules out its capability to chroot,
+  and requires that configuration files, DKIM signing keys files, and
+  perl modules must be readable by this GID or UID, otherwise restart
+  fails and a daemon process no longer exists. Depending on a version
+  of perl and operating system in use, it might be necessary to specify
+  an absolute path to amavisd on the initial start. To debug warm-restart
+  problems it may be useful to first try a warm restart on a non-daemonized
+  process (# amavisd foreground), so that potential errors on stderr are
+  visible.
+
+  A need for non-root accessibility of DKIM signing keys can be avoided
+  by using a new signing service daemon included with this release (see
+  further down: amavisd-signer).
+
+  One additional feature of a warm reload is that SNMP counters in a
+  database (visible through amavisd-agent or amavisd-snmp-subagent) are
+  not reset to zero.
+
+- on stop, restart or reload, currently busy child processes are left
+  to complete their current task instead of being abruptly stopped.
+  This minimizes a disruption experienced by MTA.
+
+- added a client-side and server-side support for the IDENT attribute of
+  a Postfix XFORWARD smtp command (available since Postfix version 2.8.0).
+  The attribute allows passing of a local message identifier (MTA queue id)
+  downstream from a front-end MTA to a post-queue content filter and back
+  to a back-end MTA. Amavisd makes this information available through an
+  existing macro %Q (which was previously non-empty only in milter setups),
+  and as such the information appears in the log when using a default amavisd
+  log template. This information is also passed back to a re-entry MTA if
+  it announces a support for this attribute (enabled on a back-end smtpd
+  service with an option smtpd_authorized_xforward_hosts), so the log entries
+  are now easier to correlate:
+
+  back-end MTA:
+    postfix/smtpd[72995]: 553261D1CB0: client=localhost[::1],
+      orig_queue_id=2F5971D1CA3, orig_client=...
+
+  post-queue content filter:
+    amavis[20341]: (20341-15) Passed CLEAN ...
+      Queue-ID: 2F5971D1CA3, queued_as: 553261D1CB0
+
+  front-end MTA:
+    postfix/lmtp[73130]: 2F5971D1CA3: ... relay=127.0.0.1[127.0.0.1]:10024,
+      status=sent (250 2.0.0 from MTA(smtp:[::1]:10025):
+                   250 2.0.0 Ok: queued as 553261D1CB0)
+
+- support Postfix 2.9 long queue IDs (enable_long_queue_ids=yes) as available
+  since postfix-20110321 by adjusting default values for $log_short_templ
+  and $log_verbose_templ templates;
+
+- improved support for pre-queue content filtering setups: reorganized time
+  limiting on processing to obey more strictly a deadline time, which is the
+  sum of $child_timeout and a timestamp at the moment of a reception of a
+  complete message (SMTP data-end time). The deadline time is also passed
+  to SpamAssassin, which since version 3.3.0 supports a 'master_deadline'
+  option and can gracefully terminate its processing on a time limit, while
+  still providing results collected so far.
+
+  The setting $sa_timeout is now retired: the variable is still declared
+  for backward compatibility, but has no effect. Instead, the time available
+  for spam scanning is automatically determined from $child_timeout, taking
+  into consideration the actual time left till the deadline;
+
+- $child_timeout and $smtpd_timeout settings are now dynamic, i.e. can be
+  changed by a policy bank, which makes it possible to support (on different
+  ports) both the pre-queue and post-queue (e.g. fallback) clients by the
+  same amavisd daemon;
+
+- a new configuration variable $soft_bounce (also a member of policy banks)
+  turns rejects, bounces and discards into a temporary failure when true;
+  this is potentially useful as a short-term safety net when testing
+  configuration changes on a low-traffic server;
+
+- added an AV entry and a supporting code for Sophos-SSSP, implementing
+  the client side of the Sophos SSSP protocol, talking to a savdid daemon
+  (a replacement for Sophie) using its native protocol;
+
+- added an AV entry and a supporting code for AVIRA SAVAPI protocol,
+  implementing the client side of the protocol, talking to a savapi daemon;
+
+- added an AV entry for clamdscan which can serve as a useful backup scanner,
+  connecting as client to a remote clamd; the supplied alternative config
+  file should specify the host IP and port number where clamd is running
+  using TCPAddr and TCPSocket options; suggested by Michael Scheidell;
+
+- added an AV entry for ClamAV clamd streaming which can serve as a main
+  or backup scanner, connecting as client to a remote clamd. The client
+  side implements clamd zINSTREAM command, batched in a zIDSESSION / zEND
+  group. This approach is comparable to what is implemented in clamdscan
+  and is somewhat less efficient than passing only a directory name to
+  clamd, but has an advantage that the clamd daemon need not have direct
+  access to amavisd temporary files, and may even be running on a remote
+  host. The cost of this flexibility is additional data transfer.
+  Suggested by Michael Scheidell.
+
+- lists of lookup tables (the @*_maps variables) can now contain
+  explicit SQL and LDAP lookup objects as their elements, instead of
+  (or in addition to) the implied SQL and LDAP lookups.
+
+  A new configuration setting $lookup_maps_imply_sql_and_ldap controls
+  whether the SQL and LDAP lookup objects are implicitly prepended
+  to list in @*_maps variables (when true), or not (when false).
+  The default value is 1 for compatibility with previous versions.
+
+  Regardless of the $lookup_maps_imply_sql_and_ldap controls setting,
+  the @*_maps lists of lookup tables/objects may now contain explicit
+  lookup objects for arbitrarily named SQL fields and LDAP attributes.
+  This provides more flexibility: the order of lookups is now configurable
+  (previously SQL and LDAP lookup objects were prepended to lists and thus
+  always executed first), and the names of SQL fields or LDAP attributes
+  can now be specified as arguments to SQL and LDAP lookup objects
+  (previously field and attribute names were hardwired into code).
+
+  Three shorthand functions are available for creating SQL lookup (query)
+  objects: q_sql_s, q_sql_n, q_sql_b, and three for creating LDAP lookup
+  (query) objects: q_ldap_s, q_ldap_n, q_ldap_b.  The _s, _n and _b suffixes
+  imply a data type of the expected result: a string, a numeric value, and
+  a boolean. Due to Perl's forgiveness a string data type can in most cases
+  be used as a number or a boolean and may be used when data type conversion
+  and value normalization is not necessary or when a data type is not known.
+
+  Here are some examples:
+
+  @spam_kill_level_maps = (
+    { # a hash-type lookup object
+      'user1@example.com' => 8,
+      '.example.org' => 7.5,
+    },
+    q_ldap_n('amavisSpamKillLevel'),  # an LDAP lookup object
+    q_sql_n('spam_kill_level'),  # an SQL lookup object
+    $sa_kill_level_deflt,  # a constant-type pseudo-lookup object
+  );
+
+  @spam_subject_tag2_maps = (
+    q_sql_s('subject_tag'),
+  );
+
+  In addition to simple scalar arguments (field or attribute names),
+  these six lookup object -creating functions can take as their argument
+  a listref of field or attribute names, or a hashref where hash element
+  values are field (or attribute) names and hash element keys are the
+  result data names. Lookups resulting from such lookup objects will
+  return a hashref of key/value pairs instead of a single scalar result.
+  This is currently only useful in the @dkim_signature_options_bysender_maps
+  list of lookups which expects such hash results (sets of data names
+  and their values, i.e. entire records).
+
+  The listref argument is just a shorthand notation which can be used
+  in place of a hashref when field names (or attribute names) are the
+  same as the desired result data names. The following alternatives
+  are equivalent:
+    q_sql_s( { 'd' => 'd', 's' => 's', 'ttl' => 'ttl' } )
+    q_sql_s( {  d  => 'd',  s  => 's',  ttl  => 'ttl' } )  # perl shorthand
+    q_sql_s( [ 'd', 's', 'ttl' ] )
+    q_sql_s( [qw(d s ttl)] )  # perl shorthand
+
+  Example (artificial, not necessarily useful):
+
+    @dkim_signature_options_bysender_maps = (
+      q_sql_s(  ['d', 's', 'ttl'] ),
+      q_ldap_s( ['d', 's', 'a'] ),
+      q_ldap_s({ d => 'sdid', s => 'amavisSelector', a => 'amavisDkimAlg' }),
+      { 'postmaster@example.com' => { a => 'rsa-sha1', ttl => 7*24*3600 },
+        '.' => { a => 'rsa-sha256', ttl => 30*24*3600 },
+      },
+    );
+
+- a new configuration variable $sql_store_info_for_all_msgs when turned
+  off requests storing information on mail messages selectively just for
+  quarantined messages. At the same time turning this setting off also
+  disables pen pals lookups. A default value is 1 (true) as before,
+  indicating that information on all messages is to be stored into tables
+  msgs, msgrcpt and maddr when @storage_sql_dsn is enabled, thus ensuring
+  long-term uniqueness of mail_id and proper operation of pen pals lookups;
+
+- a new program is included with a package: amavisd-signer. It is a DKIM
+  signing service daemon for amavisd. It uses an AM.PDP protocol lookalike
+  to receive a request from amavisd and provides two services: choosing a
+  signing key, and signing a message digest with a chosen DKIM private key.
+
+  Amavisd uses this signing service when a $dkim_signing_service setting
+  is defined and nonempty, and $enable_dkim_signing is true. For each
+  mail message meeting the basic requirements for signing (originating,
+  nonspam and not infected), the first request sent to a signing service
+  passes some information about the message (its author, sender, recipients)
+  and expects the service to choose and provide a suitable signing domain
+  and selector (and optional signature options) when a signing key is
+  available and the service considers it appropriate to sign the message.
+  If the response does not provide a signing domain and selector,
+  amavisd falls back to consulting its own settings (a dkim_key() set
+  of signing keys, and @dkim_signature_options_bysender_maps).
+
+  The second stage of signing occurs when a signing key has been uniquely
+  identified during the first stage, i.e. when its signing domain and a
+  selector have been determined. Amavisd computes a message digest according
+  to DKIM specifications and passes it to the signing service, along with
+  the signing domain and selector name. The signing service computes the
+  signature and returns it as a 'b' attribute (corresponding to a 'b' tag
+  of a DKIM signature), from which amavisd assembles the signature header
+  field and inserts it into a message. The signing service may still choose
+  not to sign at this stage, e.g. when a private key corresponding to the
+  requested signing domain and selector is not available. If a signing
+  service is not available or cannot sign, amavisd falls back to its own
+  configured list of signing keys ( dkim_key() ) for backwards compatibility.
+
+  The main reason for separating the signing act from the main amavisd daemon
+  is to make it possible to do the DKIM signing without letting amavisd
+  have access to private keys - following the minimal 'need-to-know'
+  security principles. For example, amavisd may be started as non-root or
+  restarted from a jail, while the independent amavisd-signer process
+  remains the only process with access to private signing keys (by running as
+  root or under a separate UID or GID or with an access to a crypto device).
+
+  Additional benefit is that more complex decisions on which signing key
+  to use for which mail message can be delegated to the signing service,
+  which can be customized (through code changes or replacing it altogether)
+  without touching the main amavisd daemon.
+
+  To let amavisd use a signing service, specify the signing service's
+  IP address and TCP port number in amavisd.conf, e.g.:
+    $dkim_signing_service = '127.0.0.1:20203';
+  matching the $inet_socket_bind and @listen_sockets settings near the
+  beginning of the 'amavisd-service' file, then start the signing service
+  and restart amavisd daemon. Currently all the settings for amavisd-service
+  are contained in its file, no external configuration file or command line
+  options are available at present.
+
+- a constant D_TEMPFAIL has been added to a set of allowed final_*_destiny
+  values; mostly intended for completeness and testing;
+
+- a new setting @listen_sockets offers a unified configuration of listening
+  sockets. This list may be configured directly, or the traditional way: the
+  $inet_socket_port and $unix_socketname just add their entries (if any)
+  to the @listen_sockets list, and $inet_socket_bind provides a default
+  binding IP address for inet or inet6 ports. Each socket specification
+  may either be a unix socket path (as in $unix_socketname), or an inet or
+  or inet6 socket specification (as in a binding IP address $inet_socket_bind
+  combined with a port number $inet_socket_port, delimited by a colon,
+  e.g. '127.0.0.1:10024', '[::1]:10024', '10024'.  When only a port number
+  is specified without an IP address, the binding address defaults to
+  $inet_socket_bind, which in turn (if left undefined), defaults to all
+  interfaces.
+
+  An 'unspecified' binding address '0.0.0.0' implies any socket of the inet
+  family (IPv4), while an 'unspecified' address '::' implies any socket of
+  an inet6 (IPv6) family. Depending on the operating system and its settings
+  an inet6 socket may or may not be able to also accept inet connections.
+  To be able to listen on inet6 (IPv6) sockets requires a patch to the
+  Net::Server module 0.99 or earlier.
+
+  Example:
+    @listen_sockets = ( '10024', "$MYHOME/amavisd-proxy.sock",
+      '0.0.0.0:10010', '127.0.0.1:10012', '10026', '9998', '[::1]:10028' );
+
+- SMTP and LMTP client code now accepts a listref of peer socket
+  specifications, or a single scalar specification as before. This allows
+  for a failover in case some server is down or refuses connections.
+  It also provides a simpleminded load balancing between next-hop
+  (re-entry) MTA servers, as the selection from a list is random.
+  Session caching still works, so if a recently used SMTP/LMTP session
+  is still open, it will be reused, in which case no server randomization
+  takes place.
+
+  Typical configuration variables where this feature is available are:
+  $forward_method, $notify_method, $resend_method, $release_method, and
+  $requeue_method, but only when the specified protocol is smtp: or lmtp:,
+  (not pipe:, local:, sql:, bsmtp:).
+
+  Example:
+    $forward_method =
+      [ 'smtp:[::1]:10025', 'smtp:[127.0.0.1]:10025', 'smtp:*:10025' ];
+
+    $notify_method =
+      [ 'smtp:*:*', 'smtp:192.0.2.10:10025' ];
+
+  It is assumed that the protocol specification scheme (e.g. 'smtp:')
+  of all entries in a list is the same. Mixing different protocols
+  in the same list of alternatives is not allowed;
+
+- when a message is being released from a quarantine as an attachment
+  ( $release_format = 'attach' ), it is now possible to wrap this attached
+  message into a password-protected ZIP archive to prevent accidental or
+  automatic opening of the possibly malicious original message. The chosen
+  password is included in the first plain text MIME part, along with an
+  explanation / instructions for a recipient.
+
+  Note that the purpose of password scrambling is only to prevent an
+  accidental or automatic opening of an attachment. It is not intended
+  to be a strong mechanism for keeping messages secret. There is no point
+  in providing excessively long / strong passwords.
+
+  A template for this first plain-text MIME part can be changed as before
+  by assigning a new text to $notify_release_templ (or modifying a default
+  template near the end of the file 'amavisd').
+
+  Three new configuration variables are added, all three are also members
+  of policy banks: $attachment_email_name, $attachment_outer_name, and
+  $attachment_password. Their default values are:
+    $attachment_password = '';  # no password and no ZIP wrapping
+    $attachment_email_name = 'msg-%m.eml';
+    $attachment_outer_name = 'msg-%m.zip';
+
+  The $attachment_email_name is a template for forming a name of a file,
+  which is then inserted into a zip archive. This name will be seen as a
+  filename containing an original mail message when a recipient unzips
+  the archive. The supplied string may contain placeholders, the same
+  placeholders are recognized as for filename templates used to control
+  quarantining. For the record, here is a complete list of placeholders
+  currently recognized:
+    %P  =>  $msginfo->partition_tag
+    %b  =>  $msginfo->body_digest
+    %m  =>  $msginfo->mail_id
+    %n  =>  $msginfo->log_id
+    %i  =>  iso8601 timestamp of a message reception time by amavisd
+    %%  =>  %
+
+  The $attachment_outer_name is a template for forming a name of a ZIP
+  archive which will be attached to a message. This name will end up
+  in a MIME sub-header field of the attachment, and as such will be used
+  as a filename when a recipient saves the attachment (without unzipping
+  it). The supplied string may contain the same placeholders as above.
+
+  The $attachment_password setting can be:
+
+  . an empty string, in which case no ZIP wrapping will occur and no
+    passwords are applied; also the settings $attachment_email_name and
+    $attachment_outer_name have (currently) no effect, as the attachment
+    is not a ZIP archive but the original message itself;
+    this is a default setting for compatibility with earlier versions;
+
+  . a fixed static string, in which case an original message is wrapped
+    in a ZIP archive and the archive is encrypted with this fixed string
+    password;
+
+  . an undefined value ( $attachment_password = undef ), in which case
+    a 4-digit random password (PIN) is internally generated for each
+    quarantine release, the rest is the same as with a fixed string;
+
+  . a subroutine reference, in which case the supplied subroutine is
+    called (in a scalar context), passing it a $msginfo object as
+    the only argument; the subroutine is expected to return a password
+    as a string, or die if it cannot do its job; the returned value is
+    then treated as one of the three cases above, i.e. an empty string
+    disables zipping, an undefined value invokes internal PIN generating
+    code, and any other value is taken as a password for encrypting
+    the archive.
+
+  Example use:
+    $release_format = 'resend';  # choices: plain, resend (default), attach
+
+  or:
+    $release_format = 'attach';
+    $attachment_password = '';   # no archive, just plain attachment
+
+  or:
+    $release_format = 'attach';
+    $attachment_password = undef;  # internally generated 4-digit random PIN
+
+  or:
+    $release_format = 'attach';
+    $attachment_password = 'fooBAR';  # fixed password
+
+  or:
+    $release_format = 'attach';
+    $attachment_password = sub {
+      my($msginfo) = @_;
+      my $str = qx'pwgen -N 1 -n -B -s 6';
+      die "pwgen failed, exit status: $?" if $?;
+      die "pwgen returned empty result" if $str eq '';
+      return $str;
+    };
+
+  As the $attachment_password is a member of policy bank, it is possible
+  to configure amavisd to listen to release requests on two TCP ports,
+  for example using one to release unencrypted false-positive spam messages,
+  and the other to release possibly problematic infected messages.
+
+
+- updated amavisd-snmp-subagent and AMAVIS-MIB.txt by adding ten
+  user-specifiable 64-bit counters and ten user-specifiable 32-bit gauges;
+  Counters are placed into OID tree under 1.3.6.1.4.1.15312.2.1.1.17
+  and named UserCounter1..UserCounter10, whereas gauges are placed
+  under 1.3.6.1.4.1.15312.2.1.1.18 and named UserGauge1..UserGauge10.
+  A custom hook or a policy bank ACTION hook can be used for adjusting
+  their values by calling snmp_count64() routine, e.g.:
+    Amavis::Util::snmp_count64('UserCounter3', 'UserCounter9');
+  or:
+    Amavis::Util::snmp_count( ['UserCounter4', 1234, 'C64'] );
+
+- updated amavisd-snmp-subagent and AMAVIS-MIB.txt by adding the following
+  counters, all placed under 1.3.6.1.4.1.15312.2.1.1 :
+
+    .19.1   InMsgsStatusAcceptedAll         same value as .2.7
+    .19.2   InMsgsStatusAcceptedInbound
+    .19.3   InMsgsStatusAcceptedOutbound
+    .19.4   InMsgsStatusAcceptedInternal
+    .19.5   InMsgsStatusAcceptedOriginating
+    .19.6   InMsgsStatusAcceptedOpenRelay
+
+    .20.1   InMsgsStatusRelayedUntaggedAll  (no equivalent)
+    .20.2   InMsgsStatusRelayedUntaggedInbound
+    .20.3   InMsgsStatusRelayedUntaggedOutbound
+    .20.4   InMsgsStatusRelayedUntaggedInternal
+    .20.5   InMsgsStatusRelayedUntaggedOriginating
+    .20.6   InMsgsStatusRelayedUntaggedOpenRelay
+
+    .21.1   InMsgsStatusRelayedTaggedAll    (no equivalent)
+    .21.2   InMsgsStatusRelayedTaggedInbound
+    .21.3   InMsgsStatusRelayedTaggedOutbound
+    .21.4   InMsgsStatusRelayedTaggedInternal
+    .21.5   InMsgsStatusRelayedTaggedOriginating
+    .21.6   InMsgsStatusRelayedTaggedOpenRelay
+
+    .22.1   InMsgsStatusDiscardedAll        same value as .2.9
+    .22.2   InMsgsStatusDiscardedInbound
+    .22.3   InMsgsStatusDiscardedOutbound
+    .22.4   InMsgsStatusDiscardedInternal
+    .22.5   InMsgsStatusDiscardedOriginating
+    .22.6   InMsgsStatusDiscardedOpenRelay
+
+    .23.1   InMsgsStatusNoBounceAll         same value as .2.10
+    .23.2   InMsgsStatusNoBounceInbound
+    .23.3   InMsgsStatusNoBounceOutbound
+    .23.4   InMsgsStatusNoBounceInternal
+    .23.5   InMsgsStatusNoBounceOriginating
+    .23.6   InMsgsStatusNoBounceOpenRelay
+
+    .24.1   InMsgsStatusBouncedAll          same value as .2.11
+    .24.2   InMsgsStatusBouncedInbound
+    .24.3   InMsgsStatusBouncedOutbound
+    .24.4   InMsgsStatusBouncedInternal
+    .24.5   InMsgsStatusBouncedOriginating
+    .24.6   InMsgsStatusBouncedOpenRelay
+
+    .25.1   InMsgsStatusRejectedAll         same value as .2.12
+    .25.2   InMsgsStatusRejectedInbound
+    .25.3   InMsgsStatusRejectedOutbound
+    .25.4   InMsgsStatusRejectedInternal
+    .25.5   InMsgsStatusRejectedOriginating
+    .25.6   InMsgsStatusRejectedOpenRelay
+
+    .26.1   InMsgsStatusTempFailedAll       same value as .2.13
+    .26.2   InMsgsStatusTempFailedInbound
+    .26.3   InMsgsStatusTempFailedOutbound
+    .26.4   InMsgsStatusTempFailedInternal
+    .26.5   InMsgsStatusTempFailedOriginating
+    .26.6   InMsgsStatusTempFailedOpenRelay
+
+  For compatibility, the following counters appear in the MIB
+  at two locations (both locations present the same value):
+    .19.1 or .2.7   InMsgsStatusAcceptedAll
+   (.20.1     -     InMsgsStatusRelayedUntaggedAll)
+   (.21.1     -     InMsgsStatusRelayedTaggedAll)
+    .22.1 or .2.9   InMsgsStatusDiscardedAll
+    .23.1 or .2.10  InMsgsStatusNoBounceAll
+    .24.1 or .2.11  InMsgsStatusBouncedAll
+    .25.1 or .2.12  InMsgsStatusRejectedAll
+    .26.1 or .2.13  InMsgsStatusTempFailedAll
+
+  The value of a counter .2.8 InMsgsStatusRelayed is a sum of:
+    .20.1 InMsgsStatusRelayedUntaggedAll
+    .21.1 InMsgsStatusRelayedTaggedAll
+
+  Their semantics is documented in AMAVIS-MIB.txt .
+  Suggested by Patrick Ben Koetter.
+
+- a policy bank may now provide a custom hook as a hash key 'ACTION'.
+  On loading a policy bank whose ACTION key has an associated value
+  being a subroutine reference, the supplied subroutine is called when
+  a policy bank is loaded, before its remaining keys/values are copied
+  to the current setting. The action routine is passed two arguments:
+  a $msginfo (a ref to an object containing all the information about
+  a message being processed), and a policy name being loaded. Note that
+  $msginfo may be undef if a policy bank is loaded early - before a
+  $msginfo object is created, such as with policy banks associated with
+  a port number or with client's IP address;
+
+  Example use:
+    $policy_bank{'TRUSTED_BOOKSHOPS'} = {
+      bypass_spam_checks_maps => [1],
+      spam_lovers_maps => [1],
+      ACTION => sub { Amavis::Util::do_log(2,'Buying a book?');
+                      Amavis::Util::snmp_count64('UserCounter2'); },
+    };
+    @author_to_policy_bank_maps = ({
+      'amazon.com'   => 'TRUSTED_BOOKSHOPS',
+      'amazon.co.uk' => 'TRUSTED_BOOKSHOPS',
+      'amazon.de'    => 'TRUSTED_BOOKSHOPS',
+    });
+
+- a new configuration variable @virus_name_to_policy_bank_maps has been
+  introduced. It allows loading of policy banks based on a virus name
+  as reported by virus scanners. Reported names converted to spam by a
+  @virus_name_to_spam_score_maps are no longer treated as virus names
+  and as such are not eligible to @virus_name_to_policy_bank_maps.
+
+  The @virus_name_to_policy_bank_maps is a list of lookup tables. A lookup
+  key is each virus name as reported by any virus scanner. A result of a
+  lookup is expected to be a string containing a comma-separated list of
+  policy bank names. Nonexistent policy banks are ignored. Duplicate names
+  are merged into a single name. The most suitable lookup mechanisms are
+  a regexp lookup and a hash lookup, as these are able to provide an
+  arbitrary user-specifiable result (unlike a list-based (ACL) lookup, which
+  can only provide a boolean value). Suggested by Patrick Ben Koetter.
+
+  Example use:
+
+    @virus_name_to_policy_bank_maps = (
+      new_RE(  # a regexp lookup
+        [ qr'^(W32/MyDoom|W32/Netsky|Mal/BredoZp)' => 'VIRUS,MASS_VIRUS' ],
+        [ qr'\bEICAR\b'i => 'EICAR_TEST' ],
+      ),
+      'VIRUS',  # constant (pseudo)lookup, catchall for any other virus name
+    );
+
+    $policy_bank{'VIRUS'} = {
+      ACTION => sub { Amavis::Util::snmp_count('UserCounter1') },
+    };
+
+    $policy_bank{'EICAR_TEST'} = {
+      log_templ => $log_short_templ . ', EICAR test message, not to worry',
+      final_destiny_by_ccat  => { CC_VIRUS() => D_BOUNCE },
+    };
+
+    $policy_bank{'MASS_VIRUS'} = {  # mute everything using a big hammer
+      final_destiny_by_ccat     => { CC_VIRUS() => D_DISCARD },
+      warnsender_by_ccat        => { REPLACE => 1 },
+      warnrecip_maps_by_ccat    => { REPLACE => 1 },
+      quarantine_method_by_ccat => { REPLACE => 1 },
+      admin_maps_by_ccat        => { REPLACE => 1 },
+      newvirus_admin_maps => [],
+      log_templ => 'MASS VIRUS DROPPED, ' . $log_templ,
+      ACTION => sub { Amavis::Util::snmp_count('UserCounter2') },
+    };
+
+- transparent archival quarantine is a special case of archive quarantining
+  which retains all recipient addresses unmodified in an envelope of a message
+  directed to a quarantine. It makes sense when $archive_quarantine_method
+  specifies protocols 'smtp:' or 'lmtp:' or 'bsmtp:' and a dedicated server
+  is used which guarantees these quarantined messages will *not* be delivered
+  to recipients in the envelope.
+
+  Transparent archiving is used when $archive_quarantine_to (actually the
+  @archive_quarantine_to_maps) results in a reserved string '%a' for all
+  recipients.
+
+  Think of the '%a' as a placeholder in a replacement string, being
+  substituted by a full original address. There may be other substitution
+  placeholders available in the future, equivalent to placeholders %l, %d,
+  etc. in SQL query templates.
+
+  Example:
+    $archive_quarantine_method = 'smtp:127.0.0.1:7777';
+    $archive_quarantine_to = '%a';
+    @archive_quarantine_to_maps = (\$archive_quarantine_to);
+
+  or:
+    $archive_quarantine_method = ['smtp:[::1]:7777', 'smtp:127.0.0.1:7777'];
+    @archive_quarantine_to_maps = (
+      { '.example.com' => '%a',
+        '.example.net' => '%a',
+        '.example.org' => 'quarantine@example.org',
+        '.' => undef,
+      }
+    );
+
+  The envelope sender address of messages sent to an archival quarantine
+  is still controlled by the $mailfrom_to_quarantine setting as before.
+  When this value is undef (which is a default) the envelope sender address
+  remains unchanged - is the same as in a received message. Any other value
+  replaces the original sender address, so an empty string implies a null
+  return path.
+
+  When delivering quarantine messages to a dedicated SMTP server it must be
+  ensured that the receiving server will not bounce or reject quarantine
+  messages or deliver them to recipients specified in the SMTP envelope!
+
+  If a receiving SMTP server announces a DSN capability in its response
+  to EHLO, amavisd will add option NOTIFY=NEVER with each recipient
+  to prevent potential backscatter. This is an additional safeguard to
+  prevent potential backscatter, therefore it is recommended that the
+  receiving quarantine server implements and announces the DSN capability.
+  Specifying an empty string for the $mailfrom_to_quarantine achieves
+  the same effect (implies NOTIFY=NEVER), preventing backscatter.
+
+  Suggested by Patrick Ben Koetter.
+
+- as a convenience, two pre-defined logging templates are provided:
+  $log_short_templ and $log_verbose_templ. The former is the same as was
+  a default $log_templ in previous versions, the later is quite verbose
+  and provides most of the interesting information about a message.
+  An initial value of $log_templ is taken from the $log_short_templ.
+  To change $log_templ, either assign a new template directly as before,
+  or, as a shorthand if $log_verbose_templ is appropriate, just assign it,
+  e.g.:
+    $log_templ = $log_verbose_templ;
+
+- added a configuration variable @debug_recipient_maps. Similarly to
+  @debug_sender_maps, a debug level logging is temporarily turned on for
+  the duration of processing of this message when a recipient address
+  matches a list of lookup tables @debug_recipient_maps;
+  suggested by Patrick Ben Koetter;
+
+- internal: a delivery_method() is now a property of a recipient instead
+  of being a property of a message as a whole. This makes per-recipient
+  forwarding method selection possible. When recipients of a multi-recipient
+  message specify different forwarding methods, a message is forwarded in
+  multiple transactions, one for each unique delivery_method() setting;
+  i.e. recipients are clustered into sets with the same delivery_method
+  setting and a message for each subset of recipients if forwarded as one
+  transaction;
+
+- finer custom control over the forwarding method is available through a
+  before_send() custom hook which may override the $r->delivery_method(...)
+  for all or just some of the recipients with whatever forwarding method
+  specification is suitable - for example a next-hop server's IP address or
+  its port number can be chosen based on spam score or based on a sender
+  domain or some other characteristics of a message or of a recipient;
+
+- a new configuration variable @forward_method_maps (along with making
+  a delivery_method() a property of a recipient instead of being a property
+  of a message) makes per-recipient forwarding method selection possible;
+  suggested by Ralf Hildebrandt;
+
+  Example:
+    @forward_method_maps = ({  # use lowercase keys with hash-type lookups!
+      'user@example.com'  => 'smtp:[::1]:10025',
+      '.sub1.example.com' => 'smtp:[::1]:10026',
+      '.sub2.example.com' => 'smtp:[::1]:10027',
+      '.example.net' =>   'smtp:[127.0.0.1]:10025',
+      '.example.org' => [ 'smtp:[192.0.2.9]:125', 'smtp:[2001:db8::f]:125' ],
+      '.'            => $forward_method,
+    });
+
+- a new configuration variable %forward_method_maps_by_ccat allows the
+  forward_method_maps to depend on content type and allows per-recipient
+  specification of a forward method, such as specifying a next hop MTA's
+  IP address and port number. This offers new possibilities to control
+  mail routing for purposes like implementing sender reputation schemes
+  which dynamically choose an SMTP source IP address (typically of
+  outgoing mail) based on the contents of a mail message or based on
+  recipient's e-mail address or domain. This needs to be complemented
+  by a suitable configuration of an MTA, such as Postfix 2.7.0 or later.
+  The default is to use the $forward_method setting, ensuring compatibility.
+  There is no need to specify entries for content types which are not being
+  forwarded (often: CC_VIRUS, CC_BANNED, CC_SPAM).
+
+  Example use:
+
+    $forward_method = 'smtp:[127.0.0.1]:10025';
+
+    %forward_method_maps_by_ccat = (
+      CC_BADH.',3',  [ 'smtp:*:10027' ],
+      CC_BADH.',4',  [ 'smtp:*:10027' ],
+      CC_BADH.',5',  [ 'smtp:*:10027' ],
+      CC_BADH.',6',  [ 'smtp:*:10027' ],
+      CC_BADH.',8',  [ 'smtp:*:10027' ],
+      CC_SPAMMY,     [ 'smtp:[192.0.2.22]:10025' ],
+      CC_CATCHALL,   sub { ca('forward_method_maps') },
+    );
+
+- added a global configuration setting $allow_preserving_evidence,
+  defaults to true; turning it off disables preserving temporary files
+  (as evidence) in case of trouble; potentially useful for unattended
+  and unmonitored operation; the setting has no influence on preserving
+  evidence in case of @debug_sender_maps triggering;
+
+- an entry for CC_UNCHECKED was added to %admin_maps_by_ccat, defaulting
+  to @virus_admin_maps. Hence administrator notifications are also sent
+  for messages which cannot be decoded (e.g. are encrypted or contain
+  a mangled archive) if virus administrator notifications are enabled.
+  To turn off sending administrator notifications for unchecked contents:
+    delete $admin_maps_by_ccat{&CC_UNCHECKED};
+
+- to avoid a need to directly manipulate the *_by_ccat settings, a set
+  of individual configuration variables associated with CC_UNCHECKED
+  contents category was added, with their default values compatible
+  with earlier versions of amavisd:
+    $final_unchecked_destiny = D_PASS;
+    $unchecked_quarantine_method = undef;
+    $unchecked_quarantine_to = 'unchecked-quarantine';
+    @unchecked_quarantine_to_maps = (\$unchecked_quarantine_to);
+    LDAP attribute: amavisUncheckedQuarantineTo
+    SQL field:      unchecked_quarantine_to
+
+- a failure of all virus scanners no longer automatically tempfails the
+  operation, but flags a message with a CC_UNCHECKED contents category
+  (just like a failure of decoders/dearchivers), and allows the usual
+  controls (*_destiny, *_quarantine_*) to be used to choose behaviour;
+  for example:
+    $final_unchecked_destiny = D_TEMPFAIL;
+    $unchecked_quarantine_method = 'local:unchecked/%m.gz';
+
+  To revert to a previous behaviour where a failure of all virus scanners
+  resulted in a temporary failure, set the $virus_scanners_failure_is_fatal
+  to true, e.g.:
+    $virus_scanners_failure_is_fatal = 1;
+  The setting $virus_scanners_failure_is_fatal is a member of policy banks.
+
+- support decompression of a .xz file format and legacy .lzma file formats
+  through XZ Utils ( http://tukaani.org/xz/ ) if an entry with a decoding
+  program is found in the @decoders list; it defaults to finding a program
+  'xz' or 'xzdec' in the $path ;
+
+- added two new functions: iso8601_year_and_week() and iso8601_yearweek()
+  to accompany the existing function iso8601_week();  they all provide
+  a week-of-the-year number (ISO 8601 / EN 28601, 1..53, in local time zone)
+  given a Unix timestamp (seconds since 1970-01-01T00:00Z) as an argument,
+  optionally together with the corresponding year number. The result is an
+  integer or a pair of integers as follows:
+
+    $w = iso8601_week($unix_time);                 # e.g.  49
+    $yw = iso8601_yearweek($unix_time);            # e.g.  201049
+    ($y, $w) = iso8601_year_and_week($unix_time);  # e.g. (2010,49)
+
+  Semantics is equivalent to PostgreSQL extract(week from ...), and
+  to MySQL week(date,3). These functions can be useful for assigning
+  to a $partition_tag (in amavisd.conf), e.g.:
+    $partition_tag =
+      sub { my($msginfo)=@_; iso8601_week($msginfo->rx_time) };
+  or:
+    $partition_tag =
+      sub { my($msginfo)=@_; iso8601_yearweek($msginfo->rx_time) };
+
+  Suggested by Michael Scheidell.
+
+- the two placeholders %k and %a in templates for SQL lookup clauses
+  $sql_clause{'sel_policy'} (i.e. $sql_select_policy) and
+  $sql_clause{'sel_wblist'} (i.e. $sql_select_white_black_list)
+  were augmented by four new placeholders: %l, %u, %e, and %d,
+  potentially facilitating forming of more complex SQL queries;
+  suggested by Marco Fretz.
+
+  The following replacements are made:
+    %a -> exact/unmodified e-mail address (same as the first entry in %k)
+    %l -> full unmodified localpart (all up to, but not including the '@')
+    %u -> lowercased username (a localpart without extension)
+    %e -> lowercased address extension (including a delimiter), if any
+    %d -> lowercased domain (without '@')
+    %k -> a list of lookup strings, as before (see below)
+
+  For example, given an e-mail address: User+Foo@Sub.Example.COM
+  the placeholders would be substituted by:
+
+    %a  User+Foo@Sub.Example.COM
+    %l  User+Foo
+    %u  user
+    %e  +foo
+    %d  sub.example.com
+
+    %k  User+Foo@sub.exAMPLE.COM
+        user+foo@sub.example.com
+        user@sub.example.com
+        user+foo
+        user
+        @sub.example.com
+        @.sub.example.com
+        @.example.com
+        @.com
+        @.
+
+- per-recipient (or per- policy bank, or global) SpamAssassin configuration
+  files or SQL configuration sets are now supported (the @sa_userconf_maps
+  setting, a policy.sa_userconf SQL field). A multi-recipient message whose
+  recipients map to different configuration sets will be checked by calling
+  SpamAssassin multiple times, once for each unique SpamAssassin configuration
+  set. A configuration set is either a filename, or a set of SQL records
+  obtained from SpamAssassin's user_scores_dsn SQL database by calling its
+  method load_scoreonly_sql().
+
+  A lookup on a list of lookup tables @sa_userconf_maps may return undef
+  or an empty string implying no user preferences file, or may provide a
+  file name (absolute path, or relative to $MYHOME) of a SpamAssassin's
+  'user preferences' configuration file, or may start with a string 'sql:'
+  which implies loading user preferences from a user_scores_dsn SQL database
+  (as declared in a SpamAssassin's configuration file) for a username
+  provided by a lookup on @sa_username_maps (see further down).
+
+  SpamAssassin will be requested to load a user preferences configuration
+  through its read_scoreonly_config() or load_scoreonly_sql() method, which
+  otherwise (in spamd) serves to load user's .spamassassin/user_prefs file
+  or SQL preferences when switching users. See SpamAssassin documentation
+  file sql/README for SQL details.
+
+  SpamAssassin's SQL database is only consulted if user_scores_dsn is
+  declared in a SpamAssassin configuration file, and the @sa_userconf_maps
+  returns a string starting with 'sql:' (case insensitive, the rest of the
+  string is currently ignored). If a username as provided by a lookup on
+  @sa_username_maps equals the username under which amavisd was started,
+  SpamAssassin's SQL preferences for that username will not be loaded - it
+  is assumed that preferences for a default username are empty, i.e. that
+  it uses a default SpamAssassin configuration.
+
+  Each time that currently loaded configuration needs to be replaced
+  by another or restored to a systemwide default, an initial SpamAssassin
+  configuration is restored through SpamAssassin's copy_config() method.
+
+  Note that saving an original SpamAssassin configuration, loading a user
+  configuration, and restoring to the original configuration does not come
+  cheap: it can take 200 ms for a load and restore, and 370 ms for the
+  initial saving of the configuration (saving is only done once per child
+  process, and only if needed). Saved configuration can occupy additional
+  2 MB of virtual memory, so use the feature sparingly. No penalty occurs
+  until a child process does its first loading of a user configuration, so
+  rarely activated or inactive policy banks or per-recipient setting using
+  this feature do not cause any additional processing or occupy additional
+  memory.
+
+  According to SpamAssassin documentation, a user preferences file or SQL
+  preferences can include scoring options, scores, whitelists and blacklists,
+  etc. If 'allow_user_rules' is enabled (local.cf), then user preferences
+  file can also include rule definitions and privileged settings - but not
+  administrator settings.
+
+  The feature is only available since SpamAssassin 3.3.0.
+
+  Example:
+    @sa_userconf_maps = (
+      { 'user1@example.com' =>
+          '/etc/mail/spamassassin/special_user_config',
+        '.example.org' => 'sql:',
+      }
+    );
+
+  Based on a suggestion by Alexander Wirt and initially based on his patch;
+
+- added a global configuration setting $sa_num_instances with a default
+  value of 1, which is the only sensible setting for sites not using
+  per-recipient SpamAssassin configuration switching (as described in
+  the previous section).
+
+  The $sa_num_instances controls the number of Mail::SpamAssassin objects
+  (instances) created by a parent amavisd process during a startup. Each
+  SpamAssassin instance does its own initialization (loading of rules and
+  configuration settings) during a program startup and occupies a sizable
+  portion of virtual memory (like 7 MB on a 64-bit platform with SA 3.4
+  rules).
+
+  When switching SpamAssassin configurations (@sa_userconf_maps), and given
+  more than one instance of the Mail::SpamAssassin object, amavisd has a
+  choice of picking an instance which may already have loaded a selected
+  user configuration file previously, and thus save some time by not having
+  to store and reload SpamAssassin state again. This may be beneficial
+  for example when a sizable portion of users use a default SpamAssassin
+  configuration, while other users need a per-user or per-domain preferences
+  settings;
+
+  Note that as of SpamAssassin 3.3.2 some features (like compiled rules)
+  are global and not a property of a SpamAssassin instance object.
+  The problem is tracked in the SpamAssassin project as Bug 6236.
+  Until this is resolved please consider the feature experimental.
+
+- per-recipient (or per- policy bank) SpamAssassin SQL database usernames
+  are supported (setting @sa_username_maps, a policy.sa_username SQL field).
+  This makes it possible to implement per-user or per-user-group or
+  per-domain Bayes databases when SpamAssassin is configured to keep
+  its Bayes database on an SQL server. It also makes it possible to load
+  per-recipient SpamAssassin preferences (configurations) from an SQL
+  database (see previous section).
+
+  Switching between Bayes usernames is cheap compared to switching between
+  SpamAssassin configuration files.  A multi-recipient message whose
+  recipients map to different usernames will be checked by SpamAssassin
+  multiple times, once for each unique username;
+
+  Example:
+    @sa_username_maps = (
+      { 'user1@example.com' => 'user1',
+        'user2@example.com' => 'user2',
+        '.example.com'      => 'user_ex',
+      }
+    );
+
+- passes a value of $originating flag to SpamAssassin through its
+  suppl_attrib argument in a $spamassassin->parse call; it is expected
+  that this information would be treated by SpamAssassin 3.4.0 similarly
+  to msa_networks;
+
+- a new configuration variable $mail_id_size_bits allows setting the size
+  of randomly generated mail_id and secret_id codes, which are used to
+  identify a message on releasing it from a quarantine, and are used as a
+  key when logging to SQL (penpals) or storing to quarantine. The variable
+  specifies a length of mail_id in bits, and must be an integral multiple
+  of 24 (i.e. must be divisible by 6 and 8). The mail_id is represented
+  externally as a base64url-encoded string of $mail_id_size_bits / 6
+  characters, and internally as a string of $mail_id_size_bits / 8 octets.
+  The default value is 72 bits, as in previous versions.
+  Sensible values are 48, 72 and 96 bits.
+
+  See entry "introduce a concept of 'mail_id'" in amavisd-new-2.3.0 release
+  notes for probability analysis of collisions. The default size should fit
+  all practical needs.
+
+  The size of SQL fields msgs.mail_id, msgs.secret_id, msgrcpt.mail_id and
+  quarantine.mail_id may need increasing to accommodate $mail_id_size_bits/6
+  characters if using a non-default value of $mail_id_size_bits.
+  See also the next entry regarding a type for these fields.
+
+- SQL fields msgs.mail_id, msgs.secret_id, msgrcpt.mail_id and
+  quarantine.mail_id must be treated case-insensitively. A suitable data
+  type for these fields in PostgreSQL is bytea, and varbinary in MySQL
+  (of size 12 or 16 characters). In order not to lose entropy in mail_id,
+  and not to increase a probability of collisions, please check existing
+  database schema and adjust as necessary, either a data type, or chose
+  a case-sensitive collation setting. See README.sql-pg and README.sql-mysql
+  for an ALTER command to change data type of these fields.
+
+- added optional SQL and LDAP lookups for @spam_tag3_level_maps
+  (sql field: policy.spam_tag3_level, ldap attribute: amavisSpamTag3Level),
+  and for @spam_subject_tag3_maps (sql field: policy.spam_subject_tag3,
+  ldap attribute: amavisSpamSubjectTag3); suggested by Thomas Johnson;
+
+- added the following LDAP settings to $default_ldap:
+    sslversion, clientcert, clientkey, cafile, capath, verify,
+    sasl, sasl_mech, sasl_auth_id, localaddr, scheme, inet6;
+  allows bind authentication with a certificate or SASL and allows
+  connections to an LDAP server over IPv6;
+  based on a patch by Christian Roessner;
+
+- added macros ADDEDHEADERHAM and ADDEDHEADERSPAM, which expand
+  to newly generated header fields which SpamAssassin prepared for
+  insertion into a header section, in case the message is eventually
+  declared to be nonspam or spam respectively; this information is
+  available from SpamAssassin since version 3.3.0;
+
+- macro 'dkim' now recognizes two additional keywords: 'selector',
+  'sig_sd', and 'newsig_sd', see README.customize for details;
+  in particular, the 'newsig_sd' allows to add information on newly
+  applied signature to a main log entry, and is now included in a
+  default log template;
+
+- added a macro 'mime2utf8' which takes a string as its first argument,
+  and an optional truncation length as the second. The string is decoded
+  as a MIME-Header string (understands Q or B character set encodings
+  like =?iso-8859-2?Q?...?=, =?koi8-r?B?...?=) and is converted to UTF-8,
+  optionally truncated to the specified size at clean UTF-8 boundaries,
+  and returned as a result.  Suggested by Bastian.
+  The macro can be useful in a logging template or in other templates
+  to decode Subject or From header fields, e.g.:
+
+    [? [:header_field|Subject]||,\
+    Subject: [:dquote|[:mime2utf8|[:header_field|Subject]|100]]]#
+
+- added a macro 'client_helo', which provides a client-supplied EHLO/HELO
+  domain name of the original SMTP session. The information is obtained
+  through an XFORWARD extension to an SMTP protocol as provided by Postfix,
+  or through a 'helo_name' attribute in an AM.PDP request.
+  Add something like:
+    , helo=[:client_helo]#
+  to the log template if it needs to be logged. Suggested by Xueron Nee;
+
+- added a macro 'client_addr' which is a synonym for macro 'a';
+  the information is obtained through an XFORWARD extension to an SMTP
+  protocol as provided by Postfix, or through a 'client_address'
+  attribute in an AM.PDP request; if neither of these are available,
+  the client's IP address is parsed from a topmost Received header field;
+
+- added a macro 'client_port', yields a TCP source port number of an
+  original SMTP session; the information is obtained through an XFORWARD
+  extension to an SMTP protocol as provided by Postfix, or through a
+  'client_port' attribute in an AM.PDP request;
+
+- added a macro 'client_addr_port' which combines a client's IP address
+  and a TCP source port number (if available) of an original SMTP session;
+  it is similar to:
+    \[[:client_addr]\]:[:client_port]
+  or when a port number is not available:
+    \[[:client_addr]\]
+
+  This macro is now included in a default main log template, so the TCP
+  source port number is logged along its IP address. This information is
+  useful in reporting abuse (e.g. client behind a NAT), troubleshooting,
+  forensics and law enforcement. If this information is not needed, please
+  assign a customized template to the $log_templ configuration variable.
+  See also the draft-ietf-intarea-server-logging-recommendations document.
+  Suggested by Rok PotoÄnik.
+
+- added a macro 'banned_parts_as_attr' and an associated per-recipient
+  attribute banned_parts_as_attr(); it provides the same information as
+  a macro 'banned_parts' and its associated attribute banned_parts(),
+  but uses a different syntax, possibly facilitating parsing and reporting
+  names or types or location of banned parts.
+
+  The following example illustrates the difference. A result is a single
+  string in both cases, wrapped here for clarity, and shows a path in a
+  message tree of a banned leaf node:
+
+  a macro 'banned_parts' can yield:
+
+      multipart/mixed |
+      application/octet-stream,.rar,Setup1.1.rar |
+      .exe,.exe-ms,setup.exe
+
+  while a macro 'banned_parts_as_attr' yields:
+
+      P=p003,L=1,M=multipart/mixed |
+      P=p002,L=1/2,M=application/octet-stream,T=rar,N=Setup1.1.rar |
+      P=p007,L=1/2/4,T=exe,T=exe-ms,N=setup.exe
+
+  for the same banned part in a message.
+
+  The single-character attribute names are unchanged from previous versions.
+  For documentation, here is a legend:
+    P: part's base name, i.e. a file name in a ./parts/ temporary directory
+    L: part's location (path) in a mail tree
+    M: MIME type as declared in MIME header fields of a message
+    T: short part's content type according to a file(1) utility
+    N: declared part names (none, one or more), as declared in MIME header
+       fields or in an archive (tar, zip, ...)
+    A: part's attributes as follows:
+       U=undecodable, C=crypted, D=directory, S=special(device), L=link
+
+- macro 'header_field' and its alias 'HEADER' now has an optional third
+  parameter (index), which chooses the header field in case of multiple
+  header fields of the same name; the default (-1) is to return the last
+  occurrence, as before; see README.customize for details;
+
+- added a macro 'actions_performed', which expands into a comma-separated
+  list of words: Accepted, Relayed(Untagged), RelayedTagged, Discarded,
+  Rejected, Bounced, NoBounce or TempFailed, followed by a mail flow
+  direction word: Inbound, Internal, Outbound or OpenRelay. For brevity
+  the 'RelayedUntagged' status appears in this list as 'Relayed'.
+  Additionally, the list may include words Quarantined and Archived.
+  For multirecipient messages it is possible that the list includes
+  more than one combination.
+
+  The purpose of this macro is to augment the bare-bones 'Passed CLEAN'
+  or 'Blocked SPAM' in the main log entry. For this purpose the default
+  log template now includes this macro call. If the additional information
+  is not desired in the log, please assign a customized template to the
+  $log_templ configuration variable.
+
+  Some examples of the new log entries:
+
+    Passed CLEAN {RelayedOutbound}, ...
+    Passed CLEAN {RelayedInbound}, ...
+    Passed CLEAN {RelayedInternal,RelayedOutbound}, ...
+    Passed SPAMMY {RelayedTaggedInbound}, ...
+    Blocked SPAM {RejectedInbound,Quarantined}, ...
+    Blocked INFECTED (Mal/BredoZp-B) {DiscardedInbound,Quarantined}, ...
+
+  Semantics of entries in the 'actions_performed' list corresponds
+  to the newly added SNMP variables 1.3.6.1.4.1.15312.2.1.1.19 - .26
+  (with the exception that 'RelayedUntagged' counter is abbreviated
+  in this macro as 'Relayed'). Please see their detailed description
+  in AMAVIS-MIB.txt .
+
+- added a macro 'rusage', which expands to a resource usage entry as provided
+  by a system service getrusage(2); the argument to the macro should be one
+  of the field names in the structure rusage (see getrusage(2) man page),
+  e.g. ru_utime, ru_stime, ru_maxrss, ru_ixrss, ru_idrss, ru_isrss,
+  ru_minflt, ru_majflt, ru_nswap, ru_inblock, ru_oublock, ru_msgsnd,
+  ru_msgrcv, ru_nsignals, ru_nvcsw, ru_nivcsw;  the information is only
+  provided if an optional perl module Unix::Getrusage is available;
+
+- SpamAssassin-compatible macros 'YESNO' and 'YESNOCAPS' now optionally
+  accept two string arguments, replacing the default strings 'Yes' and 'No'
+  in the result;
+
+- settings $enable_dkim_verification and $enable_dkim_signing are now
+  dynamic, i.e. became members of policy banks, thus facilitating
+  selectively enabling or disabling these features on a policy bank basis;
+
+- internal: added a message property object dkim_signwith_sd() which allows
+  custom hooks to provide the DKIM signing code with a selector and a
+  domain name preferred for choosing a signing key. If this information is
+  not available the signing code will consult an external signing service
+  if provided ($dkim_signing_service), or else use the built-in algorithm
+  for choosing a signing key. A custom hook may provide the information
+  as follows:
+    $msginfo->dkim_signwith_sd( ['some_selector', 'some_domain'] );
+  After a successful signing, the dkim_signwith_sd will contain a pair
+  [selector,domain] which was actually chosen for signing;
+
+- recognize and insert header fields as prepared by SpamAssassin 3.3.0
+  or later through its 'add_header' configuration option; some of the
+  standard X-Spam-* header fields are still overruled by equivalent ones
+  generated by amavisd itself, primarily to provide true per-recipient
+  handling;  header field names must still be listed in the associative
+  array %allowed_added_header_fields in order to be inserted;
+  overrides are configurable through %prefer_our_added_header_fields;
+
+- added attribute 'log_id' to the server responses in AM.PDP protocol,
+  allowing the client to match its request with the amavisd daemon logging;
+
+- added LDAP attributes: amavisAddrExtensionVirus,
+  amavisAddrExtensionSpam, amavisAddrExtensionBanned, and
+  amavisAddrExtensionBadHeader for consistency with SQL;
+  suggested by Stefan Palme;
+
+- added LDAP attributes: amavisSpamTag3Level, amavisSpamSubjectTag3,
+  amavisUncheckedQuarantineTo, amavisCleanQuarantineTo, amavisUncheckedLover,
+  amavisForwardMethod, amavisSaUserConf and amavisSaUserName for consistency
+  with SQL;
+
+- added LDAP attribute amavisDisclaimerOptions, along with its corresponding
+  SQL field 'disclaimer_options'. It finds its way to the list of lookup
+  tables @disclaimer_options_bysender_maps, so the replacement of the
+  _OPTIONS_ placeholder in @altermime_args_disclaimer could be made dynamic;
+  suggested by Quanah Gibson-Mount;
+  (TODO: update LDAP schema)
+
+- for consistencly, added LDAP attribute amavisUncheckedLover, along
+  with its corresponding SQL field 'unchecked_lover' and a statical
+  list of lookup tables @unchecked_lovers_maps, which appears in the
+  %lovers_maps_by_ccat. Previously the CC_UNCHECKED entry of the
+  %lovers_maps_by_ccat was (ab)used and shared the @virus_lovers_maps
+  value. Suggested by Patrick Ben Koetter;
+
+- added a variable $myprogram_name, which defaults to a program name
+  (perl variable $0), but may be modified in a configuration file typically
+  depending on a value of $instance_name. It is used to dynamically change
+  a process name in $0, which shows up in a ps(1) and top(1) output on
+  most Unix systems. Along with $syslog_ident, it offers a handy way to
+  distinguish amavisd instances.
+
+- if running other spam scanners besides SpamAssassin through a @spam_scanners
+  mechanism (such as DSPAM or CRM114), make header fields produced by them
+  visible to SpamAssassin too, so that its rules can benefit from additional
+  information. Note that in order for SpamAssassin to be able to see such
+  header fields from other scanners, they must be listed in the @spam_scanners
+  list *before* the 'SpamAssassin' entry.  Suggested by Marco.
+
+
+OPTIMIZATIONS
+
+- rewritten a code section on receiving SMTP/LMTP DATA, replacing perl
+  line-by-line reads & processing by reading & processing 32 kB chunks
+  of data at a time; as a result, data transfer rate has been increased
+  by a factor of about 3.9 for plain text session, and by a factor of 11
+  for encrypted (TLS) session.
+
+  Measured data rates of an SMTP DATA transfer between Postfix and amavisd
+  on a loopback interface:
+
+  No TLS (no session encryption):
+  . amavisd receiving, old code:  8.3 MiB/s
+  . amavisd receiving, new code: 32.3 MiB/s
+  . amavisd sending:             18   MiB/s
+
+  With TLS (encrypted session, AES256-SHA):
+  . amavisd receiving, old code:  1.0 MiB/s
+  . amavisd receiving, new code: 11.2 MiB/s
+  . amavisd sending:              4.3 MiB/s
+
+- save about 6 MB of virtual memory per amavisd child process by properly
+  deleting some larger data items from variables, known not to be reused;
+  thanks to the insight of Perl Monks (ikegami) in:
+    http://www.perlmonks.org/?node_id=803515
+
+- speed up lookup_ip_acl lookups on larger lists of CIDR network addresses
+  (like @mynetworks and @inet_acl list) by using a radix trie (Patricia Trie)
+  representation; the patricia trie is used when a module Net::Patricia
+  is available and a list contains more than 20 elements; minimal required
+  version of Net::Patricia is 1.015;
+
+- avoid entering and exiting a block in most map() and grep() calls saves
+  on opcodes, achieving a small reduction of code size and a tiny speedup;
+
+- 'use constant' for CC_* and D_* constants allows perl to inline them;
+
+
+OTHER
+
+- provide a workaround for a Perl 5.8.9 bug #62502, where O_WRONLY, O_APPEND
+  and other Fcntl constants can become tainted; this is an application of
+  the same workaround as already applied in 2.6.3, but covers two additional
+  code sections; the bug could manifest itself as a taint problem during
+  opening a pipe to an external mail submission problem. This only affects
+  perl 5.8.9;  the 5.8.8 and 5.10.0 are fine.  Tracked down and a patch
+  provided by Petr Rehor;
+
+- RFC 5617 now defines an "Author Domain Signature" as a valid signature
+  in which the domain name of the DKIM signing entity, i.e., the d= tag in
+  the DKIM-Signature header field, is the same as the domain name in the
+  Author Address. The change came with draft-ietf-dkim-ssp-10; previously
+  the "Author Domain Signature" was based on an 'i' tag (identity).
+
+  This change is now followed by amavisd-new 2.7.0 in macro 'dkim', in
+  evaluation of the @author_to_policy_bank_maps list, in internal attribute
+  dkim_author_sig(), and reflected in logging. Similarly, the evaluation of
+  @signer_reputation_maps is now based on a signing domain ('d' tag), instead
+  of the 'i' tag as previously. The change only affects signatures where
+  the domain name of a signing identity is a subdomain of a signing domain
+  (not identical to the signing domain), which is rare in current practices.
+
+- updated generating and parsing of Authentication-Results headear
+  field according to RFC 5451 and RFC 6008 - previously it followed
+  a draft-kucherawy-sender-auth-header. This header field is now also
+  inserted for new DKIM signatures as just-generated and inserted to a
+  passed internal-to-internal message when it is eligible for signing;
+  suggested by Florian Effenberger.
+
+- added a setting $myauthservid, also a member of policy banks, which
+  controls the "authserv-id" token in the Authentication-Results header
+  field, according to RFC 5451. Its default value is $myhostname as before.
+  Its value must comply with the RFC 5451 syntax ("dot-atom"). Having a
+  separate control may facilitate setups where a message is processed by
+  amavisd more than once, e.g. for DKIM signing of a mailing list fanout
+  messages, where the second pass should not remove an Authentication-Results
+  header field from a first pass.
+
+- updated ARF notifications to RFC 5965 (An Extensible Format for Email
+  Feedback Reports); the $report_format = 'arf' was based on ARF draft,
+  now it complies to RFC 5965;
+
+- tightened some sanity limits on DKIM verification to better handle
+  mail messages with a huge number of signatures; problem reported
+  by Tuomo Soini;
+
+- amavisd.conf: added file types ini, lib, ocx, sys, vxd to the commented-out
+  long list of file types in $banned_filename_re, along with a commented-out
+  list of type names for consideration: asd, asf, asx, url, vcs, wmd, wmz;
+
+- updated default @virus_name_to_spam_score_maps with new or changed entries:
+    [ qr'^(Heuristics\.)?Phishing\.'     => 0.1 ],
+    [ qr'^Doppelstern\.(Scam4|Phishing)' => 0.1 ],
+    [ qr'^ScamNailer\.Phish\.'           => 0.1 ],
+    [ qr'^HTML/Bankish'                  => 0.1 ],
+  thank to Giampaolo Tomassoni for Heuristics.Phishing and HTML/Bankish;
+
+- when inserting a subject tag into a Subject header field, remove
+  existing copies of the same string first to avoid subjects like
+  "***UNCHECKED*** Fwd: ***UNCHECKED*** Re: foo bar" ;  based on a
+  patch by Thomas Arendsen Hein;
+
+- p0f-analyzer.pl: treat an 'IPv4-mapped IPv6 addresses in alternative
+  form' as an IPv4 address, otherwise the p0f-analyzer.pl would ignore such
+  queries (knowing that the p0f daemon does not handle IPv6); some TCP/IP
+  stacks prefer to present an IPv4 address in this form to applications;
+  problem reported by Vytautas Kasparavicius;
+
+- suppress generating a non-delivery notification if a SpamAssassin test
+  DKIM_ADSP_DISCARD is hit, honouring RFC 5617;
+
+- amavisd.conf: commented-out calls to do_ascii to match defaults in the
+  amavisd program; the uulib code (as invoked by Convert::UUlib) has a
+  history of stability problems, seems it is causing more grief than are
+  the benefits it brings;
+
+- new AV entry for 'Avira for UNIX 3.x', thanks to g0rbi, Thomas Mueller,
+  Steffen Ille, Klaus Fuerstberger and Andreas Schulze;
+
+- add three more exception cases to mercifully ignore a EBADF I/O error
+  due to a Perl bug on line-by-line reading;
+
+- entries 'SpamAssassin' and 'SpamdClient' in the @spam_scanners list
+  now recognize options 'mail_body_size_limit' and 'score_factor', to match
+  their behaviour with 'DSPAM' and 'CRM114' entries;
+
+- dropped a logging level (from -1 to 2) on a warning message:
+    INFO: dot-stuffing error (only one leading dot): ...
+  as Postfix in a pre-queue proxy filtering setup does not do any dot-stuffing
+  sanitation, so garbage in the DATA section as received by a Postfix smtpd
+  service comes unchanged to a proxy filter; reported by Ralf Heidenreich,
+  confirmed by Victor Duchovni and Wietse Venema;
+
+- use module File::Temp to create a temporary working directory, instead
+  of using a home-brewed code; as a result, these directory names are now
+  a bit longer;
+
+- avoid slurping the whole directory contents into memory when recursively
+  tidying, removing, or checking a temporary directory, when purging old
+  database files on a restart, and when preparing a list of files to be
+  scanned;
+
+- collect a couple of random bytes from /dev/urandom (if available)
+  at a start of the main process and at each child process birth (when
+  our entropy pool is rather depleted), then stir our entropy pool and
+  perl's srand() to prevent File::Temp from working with the same
+  pseudorandom sequence in each child process;
+
+- reworked fetching random bits from entropy pool and deriving mail id
+  from secret id (after re-reading RFC 4086); much less of the private
+  entropy accumulator is now exposed to observers; added a new function
+  fetch_entropy_bytes(), dropped a function fetch_entropy();
+
+- a macro %S no longer corresponds to sender_contact, which was a relict
+  from times of early viruses; for compatibility with existing templates
+  it is now equivalent to %s, but should no longer be used and might be
+  retired or re-purposed with the next version;  default notification
+  templates were adjusted accordingly - please adjust your customized
+  if using them;
+
+- drop dependency on Digest::SHA1;
+
+- README.chroot: document that sa-update needs to update rules in the jail
+  and refresh the text somewhat; thanks to Francois Rolland;
+
+
+CLEANING
+
+- retired often misused settings $warnvirussender and $warnspamsender
+  (but kept marginally useful $warnbannedsender, $warnbadhsender, and their
+  parent %warnsender_by_ccat). To bounce or reject viruses and spam use
+  D_REJECT and D_BOUNCE settings for corresponding $final_*_destiny. It
+  is no longer supported to both deliver (D_PASS) a virus or spam message
+  while also sending a notification to sender. Both retired variables are
+  still declared for compatibility with old config files, but their value
+  is ignored. An attempt to set their value to a non-default value produces
+  a warning.
+
+- retired a setting $syslog_priority, it was not particularly useful since
+  the introduction of dynamic syslog priorities with amavisd-new-2.0 .
+  The new behaviour is equivalent to a previous $syslog_priority='debug';
+  The variable is still declared for compatibility with old config files,
+  but its value is ignored. An attempt to set its value to a non-default
+  value produces a warning.
+
+- retired a setting $SYSLOG_LEVEL, it was obsoleted by amavisd-new-2.4.0;
+  please use the setting $syslog_facility instead, defaulting to
+  $syslog_facility='mail' . The variable $SYSLOG_LEVEL is still declared
+  for compatibility with old config files, but its value is ignored.
+  An attempt to set its value to a non-default value produces a warning.
+
+- renamed $DO_SYSLOG to $do_syslog, and $LOGFILE to $logfile; old names
+  are kept as aliases for compatibility;
+
+- retired a setting $relayhost_is_client, it became obsolete with
+  amavisd-new-2.0.  Please use a '*' in place of a host IP address and
+  port number when amavisd should pass a checked mail message back
+  to the same host from which the request came, e.g.:
+    $forward_method = 'smtp:*:*';
+  The variable is still declared for compatibility with old config files,
+  but its value is ignored. An attempt to set its value to a non-default
+  value produces a warning.
+
+- retired a setting $sa_timeout, the variable is still declared for
+  backward compatibility, but has no effect. Instead, the time available
+  for spam scanning is automatically determined from $child_timeout,
+  taking into consideration the actual time left till the deadline;
+  An attempt to set its value to a non-default value produces a warning.
+
+- retired a setting $sa_spam_report_header, it was obsoleted by
+  amavisd-new-2.4.3 with the introduction of %allowed_added_header_fields.
+  To enable insertion of X-Spam-Report header field, please use instead:
+    $allowed_added_header_fields{lc('X-Spam-Report')} = 1;
+  The variable is still declared for compatibility with old config files,
+  but its value is ignored. An attempt to set its value to a non-default
+  value produces a warning.
+
+- retired settings $sa_spam_modifies_subj and @spam_modifies_subj_maps.
+  Disabling insertion of spam tag into a Subject header field can be achieved
+  by turning off the corresponding entries in %subject_tag_maps_by_ccat:
+    undef $subject_tag_maps_by_ccat{CC_SPAM()};
+    undef $subject_tag_maps_by_ccat{CC_SPAMMY.',1'};
+    undef $subject_tag_maps_by_ccat{CC_SPAMMY()};
+    undef $subject_tag_maps_by_ccat{CC_CLEAN.',1'};
+  or by emptying corresponding lists of lookup tables, e.g.:
+    @spam_subject_tag_maps  = ();
+    @spam_subject_tag2_maps = ();
+    @spam_subject_tag3_maps = ();
+  or individually (by-recipient) by specifying suitable lookup tables in
+  @spam_subject_tag_maps / @spam_subject_tag2_maps / @spam_subject_tag3_maps,
+  either statically, or through SQL or LDAP lookups;
+  Both settings are still declared for compatibility with old config files,
+  but their value is ignored. An attempt to set the value of a variable
+  $sa_spam_modifies_subj to a non-default value produces a warning.
+
+- retired a setting $insert_received_line, it was obsoleted by
+  amavisd-new-2.4.3 with the introduction of %allowed_added_header_fields.
+  To disable insertion of a Received header field, please use instead:
+    $allowed_added_header_fields{lc('Received')} = 0;
+  The variable is still declared for compatibility with old config files,
+  but its value is ignored. An attempt to set its value to a non-default
+  value produces a warning.
+
+- retired a setting $notify_xmailer_header, the X-Mailer header field is
+  not inserted into notifications, as was a default. The variable is still
+  declared for compatibility with old config files, but its value is ignored.
+  An attempt to set its value to a non-default value produces a warning.
+
+- retired a setting $sa_auto_whitelist, it became obsolete with
+  amavisd-new-2.1.0 and SpamAssassin 3.0.0 (released in 2004)
+  by a 'use_auto_whitelist 1' option in local.cf . The variable is still
+  declared for compatibility with old config files, but its value is ignored.
+  An attempt to set its value to a non-default value produces a warning.
+
+- retired a deprecated macro 'x-mailer', use macros 'header_field' or
+  'useragent' instead;
+
+- removed a constant CC_TEMPFAIL, it was retired with amavisd-new-2.5.0;
+
+- renamed a configuration variable $sql_partition_tag to $partition_tag
+  in order to reflect its more general usage outside of SQL; the old name
+  $sql_partition_tag is retained for compatibility and is an alias for
+  $partition_tag;
+
+- dropped compatibility of $final_*_destiny settings with old numerical
+  values (used by versions of amavisd older than amavisd-new-20030314);
+
+- internal: retire Amavis::In::Message::client_addr_mynets, no longer in use;
+- internal: retire Amavis::In::Message::sender_contact, no longer in use;
+- internal: retire Amavis::In::Message::PerRecip::infected, no longer in use;
+
+- internal: drop a redundant argument $conn from the following subroutines:
+
+    make_received_header_field, check_header_validity, defanged_mime_entity,
+    msg_from_quarantine, check_amcl_policy, postfix_policy,
+    add_forwarding_header_edits_common, add_forwarding_header_edits_per_recip,
+    prepare_modified_mail, do_notify_and_quarantine, do_quarantine,
+    save_info_preliminary, save_info_final, mail_dispatch,
+    dispatch_from_quarantine, virus_scan, spam_scan, white_black_list,
+    Amavis::SpamControl::{ExtProg,SpamdClient,SpamAssassin}::check
+
+  As a compatibility measure, the do_quarantine() may still be called
+  with or without the first argument $conn, its value is now ignored.
+
+  Although the $conn argument is also redundant in calls to custom hooks
+  (as this information is available as $msginfo->conn_obj), these calls
+  are left unchanged for compatibility with existing custom hooks.
+
+
+---------------------------------------------------------------------------
+                                                               May 18, 2011
+amavisd-new-2.6.6 release notes
+
+This version is strictly a maintenance release, it incorporates bug fixes
+backported from 2.7.0-pre* series and/or posted as patches to the mailing
+list.
+
+
+BUG FIXES
+
+- amavisd-release was not sending a 'mail_file' attribute when a quarantined
+  message was a non-compressed file in a single-level directory quarantine
+  (not SQL-based), causing a release failure; reported by Jarno Huuskonen;
+
+- quarantining to SQL was sporadically failing, reporting some unrelated
+  random error (like 'not available' or 'OpenSSL error: header too long');
+  reported by Tonio;
+
+- avoid a warning "_WARN: Use of uninitialized value in string eq at ...
+  line 275." when an SQL-based white/black-listing is used;
+  reported by Tonio;
+
+- wrap the sql clause  SET NAMES 'utf8'  so that only a warning at
+  a log level 2 is issued if an SQL server does not understand the
+  command (SQLite, old versions of MySQL) instead of aborting;
+  reported by Roland Holzner;
+
+
+---------------------------------------------------------------------------
+                                                              April 7, 2011
+amavisd-new-2.6.5 release notes
+
+This version is strictly a maintenance release, it incorporates bug fixes
+backported from 2.7.0-pre* series and/or posted as patches to the mailing
+list.
+
+
+BUG FIXES
+
+- when a back-end MTA rejected a message, amavisd would send a non-delivery
+  status notification, but also propagate the reject status back, which is
+  wrong, only one or the other response would be appropriate. A fix also
+  allows choosing either a D_REJECT, D_BOUNCE or D_DISCARD response for
+  such a case, configurable through %final_destiny_by_ccat at a CC_MTA
+  entry, defaulting to D_REJECT; reported by Peer Heinlein;
+
+- checking header section syntax could take excessive amounts of time
+  in some degenerate cases of a very long header section, now fixed;
+
+- do not bypass spam checking of a bounce message when its referenced domain
+  in Message-ID is non-local but pen pals are disabled; reported by Stefan;
+
+- removed some of the guesswork in bounce killer to prevent false
+  positives in certain cases of forwarding a mail message as an attachment,
+  at the expense of passing through some undesired but nonstandard bounces;
+  (also, deal with non-delivery notifications from yahoogroups.com,
+  and fixed one particular case of a false-positive in bounce killer
+  (mixed/multipart with an attached full message, sent through a mailing
+  list);
+
+- fixed a 'Zoo archive' entry in the $map_full_type_to_short_type_re list;
+
+- fixed a test for $myhostname being a FQDN to allow IDN domains (with a dash);
+
+- fixed a REPLACE hack (feature introduced in 2.6.2) on loading a policy bank;
+
+- fixed choosing the module IO::Socket::INET in ask_daemon_internal() to
+  avoid versions of IO::Socket::INET6 older than 2.55 (2.56?) failing with
+    "Address family not supported by protocol family"
+  when an IPv4 address with a port number is specified for connections
+  to a virus scanner; based on a patch by Phil Pearl (Lobbes);
+
+- do_unzip: avoid testing a version of Compress::Raw::Zlib, the module may
+  not be loaded at all and the test would fail, resulting in inoperative
+  zip unpacking; reported by Tuomo Soini;
+
+- when logging or quarantining to SQL, execute a clause: SET NAMES 'utf8'
+  after connecting to a database, to ensure the decoded Subject and From
+  header fields are correctly interpreted by a SQL server as UTF-8 encoded
+  strings. It seems the module DBD::mysql does not observe a MySQL setting
+  for 'character_set_client' and needs an explicit SET NAMES. The problem
+  did not affect PostgreSQL. Reported by Zhang Huangbin;
+
+- avoid LDAP lookups aborting the scan when a %d placeholder is used in
+  a $default_ldap{base} setting and the resulting base do not exist in
+  an LDAP schema; reported by Zhang Huangbin;
+
+- the amavisd-new 2.6.3 relaxed semantics of a number of hard links on a
+  directory in TempDir::prepare(_dir), but left out an equivalent change
+  necessary in TempDir::check, which is now fixed; the change only affects
+  certain file system (like the one used on Mac OSX);
+
+- treat an empty PID file or a junk one-liner file the same as a nonexistent
+  PID file; previously an empty PID file (e.g. after an unclean shutdown)
+  would prevent amavisd from starting; problem reported by Michael Scheidell;
+
+- changed amavisd-release to only provide a 'quar_type' attribute in its
+  request when it is reasonably sure of its appropriate value, otherwise
+  leave the decision to the amavisd daemon; this solves releasing from a
+  file-based quarantine when compression is not used and all files are at
+  the top directory; reported by Voytek Eymont;
+
+- provide a workaround for a [perl #62048] bug affecting versions of perl
+  older than (approx) 5.12.3, when a banning check if using rules in
+  $banned_namepath_re and a lookup_re() could abort with an:
+    Unwarranted "Malformed UTF-8 character"
+  on certain tainted mail part names (with a valid UTF-8 representation);
+  reported by Jakob Curdes;
+
+- provide a workaround for logging to syslog using an old version of
+  Unix::Syslog which didn't prepare and keep its own copy of the 'ident'
+  argument on a call to openlog(3); thanks to Bill Landry;
+
+
+OTHER
+
+- ensure compatibility with a new version 5.500 of MIME-Tools, which changed
+  the way mime attributes content-disposition.filename and content-type.name
+  are decoded, now properly respecting their declared encodings (character
+  set). As a result, the declared (recommended) file names of MIME parts are
+  now represented as native Perl character strings (Unicode), and as such
+  may also end up in reported names of banned parts. Regular expressions
+  in @banned_filename_maps, $banned_filename_re and $banned_namepath_re
+  may also see these strings as native Perl characters, as well as in their
+  MIME-encoded form. The change also affects interpretation of names with
+  earlier versions of MIME-Tools, making them behave more like the 5.500.
+
+- amavisd.conf: exclude names starting with 'cid:' from matching the
+  double extensions banning rule, avoiding false positives;
+
+- support Postfix 2.9 long queue IDs (enable_long_queue_ids=yes) as
+  available since postfix-20110321 by adjusting a default value of
+  a $log_templ template;
+
+- a small update to a default @virus_name_to_spam_score_maps;
+
+- the 'originating' flag is now passed on to SpamAssassin through its
+  %suppl_attrib argument - potentially useful with current trunk version
+  of SpamAssassin (treats originating mail submission as a MSA submission),
+  and ignored by older versions;
+
+- some documentation updates;
+  the RELEASE_NOTES file is now encoded as UTF-8, instead of ISO-8859-1;
+
+
+---------------------------------------------------------------------------
                                                               June 25, 2009
 amavisd-new-2.6.4 release notes
 
@@ -60,13 +2062,13 @@ NEW FEATURES SUMMARY
 NEW FEATURES
 
 - newly supplied with the package is a program amavisd-snmp-subagent,
-  acting as a SNMP AgentX, exporting amavisd statistical counters database
+  acting as an SNMP AgentX, exporting amavisd statistical counters database
   (snmp.db) as well as a child process status database (nanny.db) to a
   SNMP daemon supporting the AgentX protocol (RFC 2741), such a NET-SNMP.
 
   It is similar to combined existing utility programs amavisd-agent
   and amavisd-nanny, but instead of writing results as text to stdout,
-  it exports data to a SNMP server running on a host (same or remote),
+  it exports data to an SNMP server running on a host (same or remote),
   making them available to SNMP clients (such a Cacti or mrtg) for
   monitoring or alerting purposes.
 
@@ -76,23 +2078,23 @@ NEW FEATURES
   All of these come with a Net-SNMP package (previously known as "ucd-snmp"),
   home at http://net-snmp.sourceforge.net/, FreeBSD ports: net-mgmt/net-snmp.
 
-  Also, a snmpd daemon must be running on a host. It can be a snmpd from
+  Also, an snmpd daemon must be running on a host. It can be an snmpd from
   a Net-SNMP package or some other SNMP server supporting AgentX protocol.
   When using snmpd from Net-SNMP, just add the following to its snmpd.conf:
     master agentx
     agentXSocket tcp:127.0.0.1:705
   so that amavisd-snmp-subagent will be allowed to connect to it.
 
-  The setup was tested with Net-SNMP versions 5.4.2.1 and 5.3.2.3.  If you
-  experience wild numbers served in Counter64 variables on a 64-bit platform,
-  the following patch (at the server side) solves the problem:
+  The setup was tested with Net-SNMP versions 5.3.2.3, 5.4.2.1 and 5.2.0.
+  If you experience wild numbers served in Counter64 variables on a 64-bit
+  platform, the following patch (at the server side) solves the problem:
     http://www.mail-archive.com/
       net-snmp-users@lists.sourceforge.net/msg19502.html
   The patch seems to already be incorporated into version 5.3.3 of Net-SNMP,
-  but not yet in 5.4.2.
+  and into 5.5 (but not in 5.4.2, nor in 5.2.0).
 
   A MIB module (SNMP Management information base) is provided in a file
-  AMAVIS-MIB.txt. It is not necessary to make it available to a SNMP server,
+  AMAVIS-MIB.txt. It is not necessary to make it available to an SNMP server,
   and not even necessary for SNMP clients, but making it available to clients
   allows them to display data with names of variables, not just their OIDs.
   A query example with no MIB modules:
@@ -104,12 +2106,12 @@ NEW FEATURES
   after amavisd, and either before or after snmpd. It can also be restarted
   at any time. Also, amavisd can be restarted without having to restart
   amavisd-snmp-subagent, as it will automatically notice a database
-  change and connect to a new database. Similarly, a snmpd daemon can be
+  change and connect to a new database. Similarly, an snmpd daemon can be
   restarted at any time and amavisd-snmp-subagent will reconnect to it
   if necessary. A natural starting order is: snmpd first, then amavisd
   and then amavisd-snmp-subagent.
 
-  Restarting amavisd will reset its counters. A SNMP client typically
+  Restarting amavisd will reset its counters. An SNMP client typically
   interprets a decremented value of a counter variable as a wraparound,
   which results in a large spike when graphing data. There are two common
   solutions to the problem: a reasonable upper limit can be provided to
@@ -121,7 +2123,7 @@ NEW FEATURES
 
   The amavisd-snmp-subagent should have access to databases snmp,db and
   nanny.db in a $db_home directory (environment variable AMAVISD_DB_HOME,
-  defaults to /var/amavis/db) and have rights to connect to a snmpd daemon.
+  defaults to /var/amavis/db) and have rights to connect to an snmpd daemon.
   It is safe to run it as root, although perhaps not necessary.
 
   For testing purposes start amavisd-snmp-subagent from a command line
@@ -171,7 +2173,7 @@ NEW FEATURES
   database sweep in 4 seconds is performed, and less often when queries are
   less frequent and preferably batched in groups. If some time has passed
   since the last SNMP query (more than 4 seconds currently), resulting values
-  are always fresh as collected from a database at the time of a SNMP query.
+  are always fresh as collected from a database at the time of an SNMP query.
 
   There is one additional experimental feature - experimental in a sense
   that it may change or be dropped in future versions. If running Postfix
@@ -182,11 +2184,11 @@ NEW FEATURES
   mtaQueueEntriesIncoming, mtaQueueEntriesActive, mtaQueueEntriesDeferred.
 
   Although semantically outside the scope of amavisd, it provides a quick
-  insight into health of a MTA, and indirectly into health of amavisd.
+  insight into health of an MTA, and indirectly into health of amavisd.
   Data is made available only if a command 'postconf -h queue_directory' is
   successful at amavisd-snmp-subagent startup time and provides a sensible
   result. Like with the other two real databases, MTA directories are only
-  scanned if and when actually queried by a SNMP client (again, subject to
+  scanned if and when actually queried by an SNMP client (again, subject to
   caching). As a safety measure for times when MTA queue grows huge, there
   is a time limit for scanning each directory subtree (currently 5 seconds,
   which is about how much a typical SNMP client is willing to wait for a
@@ -208,7 +2210,7 @@ NEW FEATURES
   using the original envelope sender address and a given address as a single
   recipient (defaults to 'dummy@localhost'). It is expected that a virus
   scanner will accept a clean message (2xx) and reject an infected message
-  (status 5xx). A SMTP response is parsed as usual for any output from a
+  (status 5xx). An SMTP response is parsed as usual for any output from a
   virus scanner, typically considering a response starting with 2 as clean,
   a response starting by 5 as infected, and anything else as a scanner
   failure. The SMTP-based virus scanner should be configured not to deliver
@@ -240,7 +2242,7 @@ NEW FEATURES
     $signed_header_fields{'content-type'} = 2;
 
   Please restrict values used in %signed_header_fields to 0, 1, or 2,
-  consider other values reserved for future compatibility.
+  consider other values reserved for future use.
 
   By default the following header fields are protected from duplicates by
   a DKIM signature generated by amavisd: From, Date, Subject, Content-Type.
@@ -363,7 +2365,7 @@ BUG FIXES
     (!)FAILED to notify admin: 501 5.1.7 Failed, id=40690-23,
       from MTA([::1]:10027): 501 5.1.7 Bad sender address syntax
   Notification was not sent, the rest of the processing was unaffected;
-  reported by Peter Pechnik, Thomas Mueller, and Stefan Förster;
+  reported by Peter Pechnik, Thomas Mueller, and Stefan FÃ¶rster;
 
 - fetch_modules: only suppress the "Can't locate ... in @INC" diagnostics
   if exactly the requested module is missing, but do show the error if some
@@ -546,7 +2548,7 @@ NEW FEATURES
 OTHER
 
 - supports a SpamAssassin plugin CRM114, thanks to Jules M, and to
-  Martin Schütte for his CRM114 plugin for SpamAssassin;
+  Martin SchÃ¼tte for his CRM114 plugin for SpamAssassin;
 
 - updated AV virus scanner entry for ESET Software ESETS Command Line Interface
   to version 3.0, commenting out entries for old versions 2.7 and 2.71.12;
@@ -638,7 +2640,7 @@ OTHER
   has been removed and now produces an 'Incorrect command line' error;
 
 - log (at log level 2) a list of loaded SpamAssassin plugins during startup;
-  suggested by Giuseppe Ghibò;
+  suggested by Giuseppe GhibÃ²;
 
 - convert_keysfile: do not print @dkim_signature_options_bysender_maps
   assignment when a list of options is empty and thus redundant;
@@ -689,7 +2691,7 @@ COMPATIBILITY WITH 2.6.1
 BUG FIXES
 
 - when feeding a message by SMTP back to MTA and MTA rejects a recipient as
-  invalid and a smtp connection cache is enabled, the SMTP protocol can get
+  invalid and an smtp connection cache is enabled, the SMTP protocol can get
   out of step, rejecting the next message in the same connection with a
   "503 5.5.1 Error: nested MAIL command"; this only affects (hopefully) rare
   sites where recipient validation is performed after content filtering
@@ -882,7 +2884,7 @@ NEW FEATURES
 
 - support SMTP, LMTP and TCP_LOOKUP protocols also over Unix sockets;
 
-- added a LDAP attribute amavisArchiveQuarantineTo to code and to
+- added an LDAP attribute amavisArchiveQuarantineTo to code and to
   LDAP.schema;  a patch was provided by Anand Palaniswamy (back in
   October 2006); prompted by Quanah Gibson-Mount, both of zimbra.com.
 
@@ -930,7 +2932,7 @@ NEW FEATURES
   %final_destiny_by_ccat entirely, leaving only a key CC_CATCHALL there:
 
     $policy_bank{'DITCH'} = {
-      final_destiny_by_ccat => { REPLACE=>1, (CC_CATCHALL) => D_DISCARD },
+      final_destiny_by_ccat => { REPLACE=>1, CC_CATCHALL() => D_DISCARD },
     };
 
   Without specifying a  REPLACE=>1  remaining key/value pairs in a hash
@@ -938,11 +2940,11 @@ NEW FEATURES
   key/value pair would be replaced by a new setting (which may not be
   desirable):
     $policy_bank{'DITCH'} = {
-      final_destiny_by_ccat => { REPLACE=>0, (CC_CATCHALL) => D_DISCARD },
+      final_destiny_by_ccat => { REPLACE=>0, CC_CATCHALL() => D_DISCARD },
     };
   or equivalently:
     $policy_bank{'DITCH'} = {
-      final_destiny_by_ccat => { (CC_CATCHALL) => D_DISCARD },
+      final_destiny_by_ccat => { CC_CATCHALL() => D_DISCARD },
     };
 
 - rewritten and expanded documentation section on DKIM signing and
@@ -989,7 +2991,7 @@ OTHER
         multipart/mixed | application/octet-stream,.exe,.exe-ms,videos.exe
     F:  rule #9:application/octet-stream,.exe,.exe-ms,videos.exe
 
-  Likewise a SMTP response (with D_REJECT) would match a macro F as
+  Likewise an SMTP response (with D_REJECT) would match a macro F as
   before and would yield:
 
     554 5.7.0 Reject, id=42721-01 - BANNED: rule #9:application/octet\
@@ -1156,7 +3158,7 @@ BUG FIXES
   not to be suppressed for internally generated large score values;
   reported by Bernd Probst;
 
-- add back the 'Ok, id=..., from MTA(...):' prefix to a MTA status responses
+- add back the 'Ok, id=..., from MTA(...):' prefix to an MTA status responses
   on forwarded mail when generating own SMTP status response (it was lost
   in code transition from 2.5.4 to 2.6.0); reported by Thomas Gelf;
 
@@ -1169,7 +3171,7 @@ BUG FIXES
   a foreign key) and msgs.sid & msgrcpt.rid; they all should be of the same
   type, either integer unsigned or bigint unsigned; a schema as published
   in README.sql-mysql could not be built because of a conflict in a data
-  type; reported by Leonardo Rodrigues Magalhães and Zhang Huangbin;
+  type; reported by Leonardo Rodrigues MagalhÃ£es and Zhang Huangbin;
 
 
 NEW FEATURES
@@ -1194,8 +3196,8 @@ NEW FEATURES
 
   The following example organizes spam quarantine into weekly subdirectories:
     cd /var/virusmails
-    mkdir -p W23/spam W24/spam W25/spam  ... (weeks 01..53)
-    chown -R vscan:vscan W23 W24 W25     ... (weeks 01..53)
+    mkdir -p W01/spam W02/spam ... W53/spam  (weeks 01..53)
+    chown -R vscan:vscan W01 W02 ... W53     (weeks 01..53)
   amavisd.conf:
     $spam_quarantine_method = 'local:W%P/spam/%m.gz';
     $sql_partition_tag =
@@ -1223,7 +3225,7 @@ OTHER
   example of misclassification by a file(1) utility, where a plain text
   file is considered a DOS executable:
     [qr/^DOS executable \(COM\)/ => 'asc'],  # misclassified?
-  An example was provided by Leonardo Rodrigues Magalhães;
+  An example was provided by Leonardo Rodrigues MagalhÃ£es;
 
 - until the issue is better understood, revert the use of 'my_require'
   and go back to the standard but less informative 'require';  some people
@@ -1342,7 +3344,7 @@ MAIN NEW FEATURES SUMMARY
 - releasing from a quarantine can push a released message to an attachment;
 - new experimental code for abuse reporting using formats: ARF/attach/plain;
 - TLS support on the SMTP client and server side;
-- connection caching by a SMTP client;
+- connection caching by an SMTP client;
 - amavisd-nanny and amavisd-agent now re-open a database on amavisd restarts;
 - amavisd-nanny and amavisd-agent new command line option: -c count;
 - updated p0f-analyzer.pl to support source port number in queries;
@@ -1482,8 +3484,9 @@ NEW FEATURES
     $sql_partition_tag =
       sub { my($msginfo)=@_; iso8601_week($msginfo->rx_time) };
 
-  yields an ISO 8601 week number (1..53) corresponding to a mail reception
-  timestamp in a local time zone.
+  yields an ISO 8601 (EN 28601) week number (1..53) corresponding to a mail
+  reception timestamp in a local time zone. This week number definition is
+  equivalent to PostgreSQL extract(week from ...), and MySQL week(date,3).
 
   Another possible use of 'partition_tag' field is to let a policy bank set
   its specific value (a fixed value or a subroutine) for $sql_partition_tag.
@@ -1683,8 +3686,8 @@ NEW FEATURES
 - a new configuration variable @author_to_policy_bank_maps (also a member
   of policy banks) is a list of lookup tables (typically only a hash-type
   lookup table is used), which maps author addresses(es) (each address in
-  a 'From:' header field - typically only one) in a mail header section
-  to one or more policy bank names (a comma-separated list of names).
+  a 'From:' header field - typically only one) to one or more policy bank
+  names (a comma-separated list of names).
 
   A match can only occur if a valid DKIM author domain signature or a valid
   DKIM third-party signature is found, so in as much as one can trust the
@@ -1701,8 +3704,9 @@ NEW FEATURES
   author address and the usual lookup rules apply (README.lookups - hash
   lookups).
 
-  When a valid third-party signature is found, a lookup key is extended
-  by a '/@' and a lowercased signing domain, as shown in the example below.
+  When a valid third-party signature is found, a lookup key (author address)
+  is extended by a '/@' and a lowercased signing domain, as shown in the
+  example below.
 
   The semantics is very similar to a whitelist_from_dkim feature in
   SpamAssassin, but is more flexible as is allows any dynamic amavisd
@@ -1739,37 +3743,42 @@ NEW FEATURES
     SA:  whitelist_from_dkim  *@*  example.com
     am:  './@example.com' => 'WHITELIST',
 
-  Here is a complete example to be included in amavisd.conf:
+  Here is a complete example that can be included in amavisd.conf:
 
   @author_to_policy_bank_maps = ( {
-  # 'friends.example.net'     => 'WHITELIST,NOBANNEDCHECK',
-  # 'user1@cust.example.net'  => 'WHITELIST,NOBANNEDCHECK',
-    '.ebay.com'               => 'WHITELIST',
-    '.ebay.co.uk'             => 'WHITELIST',
-    'ebay.at'                 => 'WHITELIST',
-    'ebay.ca'                 => 'WHITELIST',
-    'ebay.de'                 => 'WHITELIST',
-    'ebay.fr'                 => 'WHITELIST',
-    '.paypal.co.uk'           => 'WHITELIST',
-    '.paypal.com'             => 'WHITELIST',  # author domain signatures
-    './@paypal.com'           => 'WHITELIST',  # 3rd-party sign. by paypal.com
-    'alert.bankofamerica.com' => 'WHITELIST',
-    'amazon.com'              => 'WHITELIST',
-    'cisco.com'               => 'WHITELIST',
-    '.cnn.com'                => 'WHITELIST',
-    'skype.net'               => 'WHITELIST',
-    'welcome.skype.com'       => 'WHITELIST',
-    'cc.yahoo-inc.com'        => 'WHITELIST',
+  # 'friends.example.net'      => 'WHITELIST,NOBANNEDCHECK',
+  # 'user1@cust.example.net'   => 'WHITELIST,NOBANNEDCHECK',
+    '.ebay.com'                => 'WHITELIST',
+    '.ebay.co.uk'              => 'WHITELIST',
+    'members.ebay.co.uk/@ebay.co.uk' => 'WHITELIST',
+    'ebay.at'                  => 'WHITELIST',
+    'ebay.ca'                  => 'WHITELIST',
+    'ebay.fr'                  => 'WHITELIST',
+    'ebay.de'                  => 'WHITELIST',
+    'members.ebay.de/@ebay.de' => 'WHITELIST',
+    '.paypal.co.uk'            => 'WHITELIST',
+    '.paypal.com'              => 'WHITELIST',  # author domain signatures
+    './@paypal.com'            => 'WHITELIST',  # 3rd-party sign. by paypal.com
+    'alert.bankofamerica.com'  => 'WHITELIST',
+    'ealerts.bankofamerica.com'=> 'WHITELIST',
+    'amazon.com'               => 'WHITELIST',
+    'amazon.de'                => 'WHITELIST',
+    'amazon.co.uk'             => 'WHITELIST',
+    'cisco.com'                => 'WHITELIST',
+    '.cnn.com'                 => 'WHITELIST',
+    'skype.net'                => 'WHITELIST',
+    'welcome.skype.com'        => 'WHITELIST',
+    'cc.yahoo-inc.com'         => 'WHITELIST',
     'cc.yahoo-inc.com/@yahoo-inc.com' => 'WHITELIST',
-    '.linkedin.com'           => 'MILD_WHITELIST',
-    'google.com'              => 'MILD_WHITELIST',
-    'googlemail.com'          => 'MILD_WHITELIST',
-    './@googlegroups.com'     => 'MILD_WHITELIST',
-    './@yahoogroups.com'      => 'MILD_WHITELIST',
-    './@yahoogroups.co.uk'    => 'MILD_WHITELIST',
-    './@yahoogroupes.fr'      => 'MILD_WHITELIST',
-    'yousendit.com'           => 'MILD_WHITELIST',
-    'meetup.com'              => 'MILD_WHITELIST',
+    '.linkedin.com'            => 'MILD_WHITELIST',
+    'google.com'               => 'MILD_WHITELIST',
+    'googlemail.com'           => 'MILD_WHITELIST',
+    './@googlegroups.com'      => 'MILD_WHITELIST',
+    './@yahoogroups.com'       => 'MILD_WHITELIST',
+    './@yahoogroups.co.uk'     => 'MILD_WHITELIST',
+    './@yahoogroupes.fr'       => 'MILD_WHITELIST',
+    'yousendit.com'            => 'MILD_WHITELIST',
+    'meetup.com'               => 'MILD_WHITELIST',
     'dailyhoroscope@astrology.com' => 'MILD_WHITELIST',
   } );
 
@@ -1792,7 +3801,7 @@ NEW FEATURES
 
 
 - smtp client connection caching is a new feature which allows smtp client
-  code in amavisd to keep a SMTP session to MTA open after forwarding a
+  code in amavisd to keep an SMTP session to MTA open after forwarding a
   message or a notification, so that a next mail message that needs to be
   sent by this child process can avoid re-establishing a session and the
   initial greeting/EHLO (and TLS) handshake.
@@ -2371,7 +4380,7 @@ NEW FEATURES
   A workaround for a small SOMAXCONN default on Solaris is provided
   by Net::Server 0.98 (?).
 
-- in the absence of a smtp client's IP address (normally received by XFORWARD
+- in the absence of an smtp client's IP address (normally received by XFORWARD
   smtp command from Postfix, or in the 'client_address' attribute of AM.PDP),
   parse the topmost one or two Received header fields and use the first
   valid IP address found there; based on a suggestion by Richard Bishop;
@@ -2386,7 +4395,7 @@ NEW FEATURES
                     opt-out-list, virus, other
   - 'rfc2822_from'  an e-mail address from a From header field;
   - 'rfc2822_sender' an e-mail address from a Sender header field, or empty;
-  - 'tls_in'        returns TLS ciphers in use by a SMTP session if mail came
+  - 'tls_in'        returns TLS ciphers in use by an SMTP session if mail came
                     to amavisd through a TLS-encrypted session, otherwise empty
   - 'limit'         takes two arguments: a string size limit and some string,
                     returning the string from the second argument unchanged
@@ -2493,9 +4502,9 @@ OTHER
   %T and %C;
 
 - when defanging mail body no longer insert our own Sender header
-  field on a pretense that it helps with DKIM resigning - according
-  to ADSP (ex SSP) drafts the DKIM/ADSP does not care for the Sender
-  header field (unlike a historical DomainKeys);
+  field on a pretense that it helps with DKIM resigning - according to
+  ADSP (ex SSP) the DKIM/ADSP does not care for the Sender header field
+  (unlike a historical DomainKeys);
 
 - always provide X-Amavis-PolicyBank header field in a copy of a mail as
   submitted to SpamAssassin, even if a policy bank path is empty - this
@@ -2597,13 +4606,13 @@ Benefits
   configuration variable @author_to_policy_bank_maps earlier in this
   release notes.
 
-- To each message passed to local recipients amavisd inserts a header field
-  Authentication-Results (according to draft-kucherawy-sender-auth-header,
-  now RFC 5451) for each signature found in a message, reporting a
-  corresponding verification result. These header fields can reliably tell
-  a recipient or his MUA what domains claimed responsibility for a message,
-  or can be used for troubleshooting DKIM signing, verification and tracking
-  mail transformations.
+- To each message passed to local recipients (matching the @local_domains_maps)
+  amavisd inserts a header field Authentication-Results (according to
+  draft-kucherawy-sender-auth-header, now RFC 5451) for each signature
+  found in a message, reporting a corresponding verification result.
+  These header fields can reliably tell a recipient or his MUA what domains
+  claimed responsibility for a message, or can be used for troubleshooting
+  DKIM signing, verification and tracking of mail transformations.
 
 - Can adjust spam score based on some metrics on a signing domain's reputation
   for valid signatures found in a message. A useful reputation metric is
@@ -2636,6 +4645,8 @@ no valid signature from domains which are known to be signing all their mail,
 such as PayPal, eBay, alert.bankofamerica.com, and others. In essence, the
 ADSP information (usually inferred, or actually published (quite rare today))
 from such domains needs to be encoded into SpamAssassin rules.
+(A note from the future: ADSP is now RFC 5617, SpamAssassin's DKIM plugin
+does implement ADSP starting with version 3.3.0.)
 
 
 A QUICK START TO DKIM SIGNING
@@ -2666,10 +4677,17 @@ A QUICK START TO DKIM SIGNING
    Amavisd already ensures the generated files are only readable by owner,
    but a manual procedure may require explicitly setting file permissions.
    Private keys must be protected from unauthorized access, only the
-   signing software such as amavisd should have access. Amavisd loads
-   these files on startup before dropping privileges, so if amavisd is
-   started as root it is not necessary that these key files are readable
-   by uid under which amavisd is running.
+   signing software such as amavisd should have read access.
+
+   On a fresh program start the amavisd daemon loads these files before
+   dropping privileges, so if amavisd is started as root these key files
+   are readable regardless of their file access permission. Note however
+   that starting with version 2.7.0 amavisd is also capable of a warm reload,
+   where the daemon restarts with existing UID, so it does not have elevated
+   privileges to read files with private keys. Therefore it is recommended
+   that the file is owned by a group under which amavisd runs and UID root,
+   and the file access permission allows read access for a group, e.g.:
+     -rw-r-----  1 root  vscan  ...  /var/db/dkim/xxx.key.pem
 
 2. Add commands to amavisd.conf to load private keys, associate them with
    signing domains and selectors, and describe constraints (tags) to be
@@ -2840,7 +4858,7 @@ amavisd-new-2.5.4 release notes
 BUG FIXES
 
 - simplify regular expressions in parse_quoted_rfc2821() to avoid perl crashing
-  on a long degenerated e-mail address; reported by Sébastien Aveline;
+  on a long degenerated e-mail address; reported by SÃ©bastien Aveline;
 
 - further simplify (split in two) regular expressions in parse_address_list()
   to avoid perl crashing on long degenerated e-mail addresses in From, To,
@@ -2904,8 +4922,8 @@ amavisd-new-2.5.3 release notes
 
 BUG FIXES
 
-- fix parsing a SMTP status response from MTA when releasing from a
-  quarantine, when a MTA response did not include an enhanced status
+- fix parsing an SMTP status response from MTA when releasing from a
+  quarantine, when an MTA response did not include an enhanced status
   code (RFC 3463) (such as with old versions of Postfix);  a parsing
   failure resulted in attribute "setreply=450 4.5.0 Unexpected:..."
   in an AM.PDP protocol response, even though a release was successful;
@@ -2915,7 +4933,7 @@ BUG FIXES
 - change parsing of addresses in From, To, and Cc header fields, avoiding
   complex Perl regular expressions which could crash a process on certain
   degenerate cases of these header fields; thanks for detailed problem
-  reports to Carsten Lührs and Attila Nagy;
+  reports to Carsten LÃ¼hrs and Attila Nagy;
 
 - completely rewritten parsing of Received header field to work around a
   Perl regular expression problem which could crash a process on certain
@@ -3043,7 +5061,7 @@ OTHER
   interface (nod32cli): added a status 3 (e.g. corrupted archive) back to
   the list of clean statuses;  the 3 was removed in 2.5.1 as the entry
   was substituted with the one from a NOD32 documentation; reported by
-  Tamás Gregorics;
+  TamÃ¡s Gregorics;
 
 - updated AV entry for 'F-Secure Antivirus for Linux servers' to cope
   with version 5.5 and later; a new entry provided by Peter Bieringer;
@@ -3165,7 +5183,7 @@ BUG FIXES
 
 - fixed quarantining to a SQL database of messages with a null envelope
   sender address (broken in 2.5.0, causing such messages to tempfail);
-  reported by Markus Edholm, Vahur Jõesalu and Michael Scheidell;
+  reported by Markus Edholm, Vahur JÃµesalu and Michael Scheidell;
 
 - fixed parsing of certain broken 'From' header fields, which would
   result in a temporary failure and the following logged error:
@@ -3203,7 +5221,7 @@ BUG FIXES
   it didn't reflect reality, it was always reported together with the:
     INFO: unfolded 1 illegal all-whitespace continuation lines
 
-- when a SMTP option BODY=8BITMIME (RFC 1652) is not given on mail
+- when an SMTP option BODY=8BITMIME (RFC 1652) is not given on mail
   reception, avoid turning it on while forwarding, even if mail body
   contains 8-bit characters;  following a garbage-in-garbage-out
   principle, this doesn't break anything that isn't already broken,
@@ -3249,7 +5267,7 @@ OTHER
   with each mail task, where actually missing modules were only loaded
   once within each child process;
 
-- avoid reporting 'BOUNCE' in a SMTP response text when a bounce (i.e.
+- avoid reporting 'BOUNCE' in an SMTP response text when a bounce (i.e.
   a nondelivery status notification) was actually suppressed, such as
   is usually the case with infected mail or when spam score exceeds
   spam_dsn_cutoff_level. Previously the SMTP response text only reflected
@@ -3733,9 +5751,9 @@ NEW FEATURES
     http://www.goldmark.org/jeff/stupid-disclaimers/
 
 
-- as mentioned above, the new SMTP/LMTP client code now supports a LMTP
-  protocol too. This allows amavisd-new to act as a LMTP-to-LMTP content
-  filter, possibly being inserted between MTA and a LMTP-based mail delivery
+- as mentioned above, the new SMTP/LMTP client code now supports an LMTP
+  protocol too. This allows amavisd-new to act as an LMTP-to-LMTP content
+  filter, possibly being inserted between MTA and an LMTP-based mail delivery
   agent such as Cyrus (if checking of outgoing mail is not needed). LMTP is
   selected when the first field of a $*_method (such as $forward_method,
   $notify_method, $resend_method, $release_method, $*_quarantine_method)
@@ -3755,7 +5773,7 @@ NEW FEATURES
   same (or less) than $max_servers, or limit the maxproc field in master.cf
   such as: 'lmtp unix - - n - 15 lmtp' .
 
-  Note that invoking amavisd as a LMTP delivery agent has a disadvantage
+  Note that invoking amavisd as an LMTP delivery agent has a disadvantage
   that outgoing mail is not being checked, so infected internal hosts are
   able to pollute the world. Also the pen pals feature is no longer useful,
   as it requires the information on previous outgoing mail to be present
@@ -3837,7 +5855,7 @@ NEW FEATURES
       virus_admin_maps => ["virusalert\@$mydomain"],
       spam_admin_maps  => ["virusalert\@$mydomain"],
       warnbadhsender   => 1,
-      # forward to a smtpd service providing DKIM signing service
+      # forward to an smtpd service providing DKIM signing service
       forward_method => 'smtp:[127.0.0.1]:10027',
       # force MTA conversion to 7-bit (e.g. before DKIM signing)
       smtpd_discard_ehlo_keywords => ['8BITMIME'],
@@ -3916,6 +5934,7 @@ NEW FEATURES
       m{\b(Email|Html)\.(Img|ImgO)(\.[^., ]*)*\.Sanesecurity\.}m
     header L_AV_MSRBL_Img  X-Amavis-AV-Status =~ m{\bMSRBL-Images/}m
     header L_AV_MSRBL_Spam X-Amavis-AV-Status =~ m{\bMSRBL-SPAM\.}m
+    header L_AV_Scam       X-Amavis-AV-Status =~ m{\bScamNailer\.}i
 
     score  L_AV_Phish      14
     score  L_AV_SS_Phish   -3
@@ -3925,6 +5944,7 @@ NEW FEATURES
     score  L_AV_SS_Img     3.5
     score  L_AV_MSRBL_Img  3.5
     score  L_AV_MSRBL_Spam 6
+    score  L_AV_Scam       8
 
 
 - added a new concept of a 'blocking contents category', which in most cases
@@ -4224,7 +6244,7 @@ SECURITY
   Note that a security hole in uulib which comes with Convert::UUlib 1.04
   and older is now (as of 2006-12-05) known to be exploitable:
     http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2005-1349
-  credits to Jean-Sébastien Guay-Leroux;
+  credits to Jean-SÃ©bastien Guay-Leroux;
 
 - p0f-analyzer.pl will no longer reply to queries coming from low-numbered
   UDP ports below 1024 or from nfsd port 2049, and will ignore queries
@@ -4265,7 +6285,7 @@ BUG FIXES
   of mail header and body, setting body_type incorrectly (with only
   cosmetic ill-effects);
 
-- fixed AM.PDP code to always provide a smtp-quoted form in angle brackets
+- fixed AM.PDP code to always provide an smtp-quoted form in angle brackets
   in 'delrcpt' and 'addrcpt' attributes of a response, i.e. in the same form
   as was received in 'sender' and 'recipient' attributes. The attribute value
   syntax is specified in RFC 2821 as 'Reverse-Path' (i.e. smtp-quoted form,
@@ -4695,7 +6715,7 @@ COMPATIBILITY WITH 2.4.2
 BUG FIXES AND WORKAROUNDS
 
 - fixed a bug (introduced with amavisd-new-2.4.0): when receiving mail
-  from MTA through a LMTP protocol (not SMTP) and with D_BOUNCE as a
+  from MTA through an LMTP protocol (not SMTP) and with D_BOUNCE as a
   final*destiny setting, a suppressed non-delivery notification (e.g.
   spam above cutoff_level) did not turn LMTP status into a success,
   so an undesired bounce was generated by MTA in a post-queue filtering
@@ -4731,7 +6751,7 @@ BUG FIXES AND WORKAROUNDS
   our own Sender field (configurable by %hdrfrom_notify_recip_by_ccat);
 
 - explicitly set PerlIO layer to ":bytes" on a temporary file handle for
-  email.txt (just in case); based on a problem report by Alexander Schäfer;
+  email.txt (just in case); based on a problem report by Alexander SchÃ¤fer;
 
 - in a string produced by a macro %c remove a decimal dot if score happens
   to be an integer;
@@ -4761,6 +6781,11 @@ BUG FIXES AND WORKAROUNDS
   possibilities include $xx{&CC_SPAM}, $xx{+CC_SPAM}, $xx{CC_SPAM()},
   $xx{(CC_SPAM)} and similar; a more obvious &CC_SPAM is avoided because
   it prevents subroutine call inlining optimization in Perl;
+
+  Note that the '+' trick does not prevent implicit quoting with the
+  '=>' operator, so this is wrong: %h = (+CC_SPAM => 1);  use '&' or
+  a '()', e.g. %h = ( CC_SPAM() => 1 );  or  %h = ( &CC_SPAM => 1 );
+  or avoid the '=>' operator and use a comma: %h = ( CC_SPAM, 1 );
 
 - qmail: update amavisd-new-qmqpqq.patch to be compatible with Net::Server
   version 0.91 or later; thanks to mr from DBA Lab S.p.A.;
@@ -4930,7 +6955,7 @@ OTHER CHANGES AND SMALL FEATURES:
   users such as amavis!
 
 - added a global config variable $enforce_smtpd_message_size_limit_64kb_min,
-  true by default; when true a rfc2822 requirement that a limit on mail size
+  true by default; when true an rfc2822 requirement that a limit on mail size
   must not be below 64 kB is enforced, so that any specified limit below 64 kB
   is treated as 64 kB; setting this variable to false disables this check,
   so mail size restrictions below 64 kB can be used and are effective;
@@ -5122,7 +7147,7 @@ OTHER CHANGES AND SMALL FEATURES:
     # to avoid later conversions which could destroy signature:
     smtpd_discard_ehlo_keywords => ['8BITMIME'],
 
-    # forward to a smtpd service providing DKIM/DomainKeys signing service:
+    # forward to an smtpd service providing DKIM/DomainKeys signing service:
     forward_method => 'smtp:[127.0.0.1]:10027',
 
     # other special treatment of locally originating mail, e.g.:
@@ -5144,7 +7169,7 @@ OTHER CHANGES AND SMALL FEATURES:
 
   Note that the same effect (making Postfix convert outgoing mail to
   7-bits before DKIM signing) could be achieved by a Postfix setting
-  smtp_discard_ehlo_keywords=8bitmime on a smtp service feeding mail
+  smtp_discard_ehlo_keywords=8bitmime on an smtp service feeding mail
   to be signed to amavisd, but this would require setting up two such
   services, one with the option and one without.
 
@@ -5287,7 +7312,7 @@ BUG FIXES AND CHANGES since 2.4.1:
 
 - zoo sucks, unzoo (v4.4) sucks more: considered, but decided against changing
   zoo entry in @decoders to ['unzoo','zoo'] in amavisd.conf, as was suggested
-  by Gábor Kövesdán. It would not necessarily be an improvement (see previous
+  by GÃ¡bor KÃ¶vesdÃ¡n. It would not necessarily be an improvement (see previous
   item, misses extracting members from my test cases), so feel free to choose
   between the two poor choices, I still prefer zoo(1), partly also because it
   covers cases which clamd decoding misses;
@@ -5307,7 +7332,7 @@ NEW FEATURES:
 
 - new feature: added command line options which override some configuration
   settings from a config file (an option to override pid_file suggested by
-  Paul Murphy and Gábor Kövesdán):
+  Paul Murphy and GÃ¡bor KÃ¶vesdÃ¡n):
 
     -d log_level        ... overrides $log_level
     -m max_servers      ... overrides $max_servers
@@ -5571,10 +7596,10 @@ OTHER CHANGES:
   as permitted by RFC 2442;
 
 - apply the concept of separate timers $child_timeout and $smtpd_timeout
-  as used in a SMTP session to AM.PDP and AM.CL protocols;
+  as used in an SMTP session to AM.PDP and AM.CL protocols;
 
 - apply the concept of separate timers $child_timeout and $smtpd_timeout
-  as used in a SMTP session to Courier patch; by Martin Orr;
+  as used in an SMTP session to Courier patch; by Martin Orr;
 
 - new macros: remote_mta, smtp_response, remote_mta_smtp_response
   and score_boost available to log templates and notification templates;
@@ -5595,7 +7620,7 @@ OTHER CHANGES:
 - make use of the new macro remote_mta_smtp_response and add it to
   a default $log_templ, so that a Postfix queue-id of a forwarded
   message shows up like 'queued_as: DCF2A17B9E4' in the main log entry,
-  facilitating search for a related log entry in a MTA log.
+  facilitating search for a related log entry in an MTA log.
   In case of a mail split, all the MTA responses would now be
   shown, e.g.:  queued_as: F3DBD17B847/F3DBD17B847/F3DBD17B847
   (customizable by the use of macros in $log_templ);
@@ -5614,7 +7639,7 @@ amavisd-new-2.4.0 release notes
 
 The most important changes since 2.3.3 at a glance:
 
-  Delivery status notifications (DSN) are now supported, both as a SMTP
+  Delivery status notifications (DSN) are now supported, both as an SMTP
   protocol extension and in notifications. Header fields like X-Amavis
   and X-Spam are now prepended to mail header for DomainKeys compatibility.
   Configuration variables can be chosen based on mail contents category,
@@ -5794,7 +7819,7 @@ OTHER CHANGES:
   Matt Jackson, Jim Knuth and Paul Seamons (the author of Net::Server)
   for help;
 
-- bug fix with LDAP lookups: if a LDAP connection to the server drops
+- bug fix with LDAP lookups: if an LDAP connection to the server drops
   (i.e. after being idle for some time) amavisd is unable to reconnect;
   a symptom in the log is: 'do_search: failed again'; a fix by Petr Vokac,
   and later independently fixed by Matteo Brancaleoni and Mike Hall;
@@ -5810,7 +7835,7 @@ OTHER CHANGES:
   field of comma-separated names. The included LDAP.schema and documentation
   files are fixed accordingly. Also moved the LDAP stuff out of README.lookups
   into its own README.ldap and updated it accordingly for the banned
-  rules stuff. Fixed by Michael Hall; problem reported by Jérôme Schell,
+  rules stuff. Fixed by Michael Hall; problem reported by JÃ©rÃ´me Schell,
   Aury Fink Filho and Brian Wong; thanks also to Jack Stewart and Willi Gruber;
 
 - bug fix: properly disconnect SMTP session with 421 response if it times out;
@@ -6063,7 +8088,7 @@ OTHER CHANGES:
     header   L_P0F_Unix   X-Amavis-OS-Fingerprint =~ /\A((Free|Open|Net)BSD|Solaris|HP-UX|Tru64|AIX)/m
     score    L_P0F_Unix   -1.0
 
-    describe L_P0F_Unix   Remote system is running Linux
+    describe L_P0F_Linux  Remote system is running Linux
     header   L_P0F_Linux  X-Amavis-OS-Fingerprint =~ /\ALinux/m
     score    L_P0F_Linux -0.1
 
@@ -6093,13 +8118,12 @@ OTHER CHANGES:
 
     # tame a Botnet plugin, reducing its false positives
     score BOTNET        0.1
-    meta  BOTNET_W      !DKIM_VERIFIED && (L_P0F_WXP || L_P0F_W) && BOTNET
+    meta  BOTNET_W      !DKIM_VALID && (L_P0F_WXP || L_P0F_W) && BOTNET
     score BOTNET_W      2.8
-    meta  BOTNET_WU     !DKIM_VERIFIED && L_P0F_UNKN && BOTNET
+    meta  BOTNET_WU     !DKIM_VALID && L_P0F_UNKN && BOTNET
     score BOTNET_WU     2.0
     meta  BOTNET_OTHER  !BOTNET_W && !BOTNET_WU && BOTNET
     score BOTNET_OTHER  0.5
-
 
   * make sure the @mynetworks is configured correctly, otherwise you will be
     inappropriately penalizing mail from internal hosts running Windows!
@@ -6360,7 +8384,7 @@ OTHER CHANGES:
   classified, e.g. it can be both a CC_VIRUS and a CC_BANNED. Supporting
   subroutines are: add_contents_category, main_contents_category,
   is_in_contents_category, setting_by_contents_category;
-  thanks for suggestions and feedback to Gérald Macinenti;
+  thanks for suggestions and feedback to GÃ©rald Macinenti;
 
   The contents_category list is a sorted list of strings, each of the form
   "major" or "major,minor", where major and minor are numbers, representing
@@ -6695,7 +8719,7 @@ All the LDAP changes are transparent to the user.
 
 - rewritten some of the code similar to the restructuring of the SQL code
   in version amavisd-new-2.3.0. A new package Amavisd::LDAP::Connection was
-  added which is a LDAP connection object, and the old connection-related code
+  added which is an LDAP connection object, and the old connection-related code
   in Amavis::Lookup::LDAP has been moved to the new package. Amavisd-new will
   now try to reconnect (once) while processing a message, similar to SQL;
 
@@ -6841,7 +8865,7 @@ SECURITY:
   a security problem in the underlying uulib:
     http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2005-1349
   which is now known to be exploitable (2006-12-05), credits to
-  Jean-Sébastien Guay-Leroux;
+  Jean-SÃ©bastien Guay-Leroux;
 
 
 INCOMPATIBILITY with 2.2.1 and older versions:
@@ -6918,7 +8942,7 @@ BUG FIXES or missing functionality:
 
 - at last: when mail is received through LMTP protocol, gracefully handle
   a temporary failure 4xx reply from MTA to a RCPT TO command and pass it
-  back to a LMTP client for tempfailed recipients only, instead of returning
+  back to an LMTP client for tempfailed recipients only, instead of returning
   450 for _all_ recipients (needed the sending routine to be aware of the
   receiving side capabilities, which was previously not available);
 
@@ -7007,35 +9031,37 @@ NEW FEATURES:
   uniqueness property and can be used for the purpose of uniquely identifying
   a quarantined mail, or for other uses. The mail_id is a 12-character string
   consisting of characters [A-Za-z0-9+-] (like base64, except for a '/' being
-  substituted by a '+'), guaranteed to start and to end with an alphanumeric
-  character (i.e. not with '+' or '-'). It is derived by cryptographically
-  strong method (MD5), cumulatively collecting entropy during the life of
-  child processes, folding-in entropy from processed mail and other cheaply
-  accessible sources, collected when an opportunity arises (e.g. file system
-  file-IDs, SA results etc), without placing a burden on system sources of
-  randomness (see RFC 4086). Note that MD5 has been demonstrated to have some
-  weaknesses, but we are not talking about cryptographic attacks here, but
-  rather about spreading messages which have no inherent intention of causing
+  substituted by a '+') [a note from the future: since amavisd-new-2.7.0 the
+  character set is [A-Za-z0-9-_] and follows rfc4648 base64url, derived from
+  base64 by substituting '+' -> '-' and '/' -> '_'], guaranteed to start and
+  to end with an alphanumeric character (i.e. not with '+' or '-' or '_').
+  It is derived by a cryptographically strong method (MD5), cumulatively
+  collecting entropy during the life of child processes, folding-in entropy
+  from processed mail and other inexpensively accessible sources, collected
+  when an opportunity arises (e.g. file system file-IDs, SA results etc),
+  without placing a burden on system sources of randomness (see RFC 4086).
+  Note that MD5 has been demonstrated to have some weaknesses, but we are
+  not talking about cryptographic attacks here, but rather about spreading
+  message identity codes which have no inherent intention of causing
   collisions.
 
-  The mail_id carries 71.9 bits of information (subject to the quality of
-  sources). For a high-end system that keeps a year's worth of mail messages
+  The mail_id carries 71.9 bits of information (subject to quality of sources
+  of entropy). For a high-end system that keeps a year's worth of mail messages
   in evidence (e.g. in quarantine) and receives 10e6 messages each day
   (20..200 TB of yearly mail contents), the probability of a mail_id
   collision happening during one year (while gradually displacing an entire
   collection with a new set of IDs) is n^2/m = 0.3 %
     (10e6 * 365)^2 / (62 * (64^(12-2)) * 62) = (10e6 * 365)^2 / 2^71.9 = 0.003
-  Eventual clash is still possible and needs to be detected, but a re-tried
-  mail delivery attempt is acceptable if its probability is low, as each mail
-  processing rolls a dice again. On a smallish system receiving 10.000 mail
-  messages daily an 8-character mail_id would suffice, but the savings are
-  not worth the trouble of providing configuration flexibility.
+  Eventual clash is still possible and needs to be detected by testing each
+  generated code against the set of message IDs currently kept in a database.
+  On a smallish system receiving 10.000 mail messages daily an 8-character
+  mail_id would suffice, but savings are not worth the trouble of providing
+  a configuration flexibility.
 
   Paired with a mail_id there is its companion secret_id generated for each
   message, such that mail_id can be derived from secret_id and pairing checked,
-  but not the other way around. The purpose of secret_id is not yet fully
-  developed, but can serve as a 'ticket', granting user a right to release
-  a quarantined message addressed to him.
+  but not the other way around. The secret_id can serve as a 'ticket',
+  granting user a right to release a quarantined message addressed to him.
 
 - SQL: can store information about every processed mail to SQL; the information
   is similar to level 0 log entries, but more detailed; a SQL database can be
@@ -7748,7 +9774,7 @@ OTHER CHANGES SINCE 2.1.2:
 
 - document the localization template directory contents
   (in file amavisd.conf-sample) when read_l10n_templates is used;
-  thanks to Joël Brogniart;
+  thanks to JoÃ«l Brogniart;
 
 - includes file Macintosh.tar.gz, which contains auto-startup scripts
   and installation instructions for Mac OS X, contributed by Dale Walsh
@@ -8287,7 +10313,7 @@ MAJOR NEW FEATURES
 
   A word of caution: the syntax of entries within a policy bank hash
   is slightly different from assignments to configuration variables.
-  This is because entries within policy bank are not asssignments, but
+  This is because entries within policy bank are not assignments, but
   key=>value pairs as in any Perl hash. And these pairs are delimited by
   commas, unlike statements, which are delimited by semicolons.
   Value is separated from its key by '=>' (or by a comma), whereas the
@@ -8550,7 +10576,7 @@ SQL, LDAP LOOKUPS
 
 - added LDAP attributes for completeness: amavisBadHeaderLover,
   amavisBypassBannedChecks, amavisBypassHeaderChecks, amavisVirusQuarantineTo,
-  amavisBannedQuarantineTo, amavisBadHeaderQuarantineTo; by Jérôme Schell;
+  amavisBannedQuarantineTo, amavisBadHeaderQuarantineTo; by JÃ©rÃ´me Schell;
 
 
 DECODING / DEARCHIVING
@@ -9529,9 +11555,10 @@ Patch: amavisd-new-20030616-p6
 
 - fix parsing of unrar info lines;
 
-- consistency with other virus/banned logic: don't send recipient notification
-  (reporting banned name) if mail contains both a virus and a banned name,
-  but $warnvirusrecip is false; reported by Nathan G. Grennan and Urska Brinar;
+- consistency with other virus/banned logic: don't send recipient
+  notification (reporting banned name) if mail contains both a virus
+  and a banned name, but $warnvirusrecip is false;
+  reported by Nathan G. Grennan and UrÅ¡ka (Brinar) Mlakar;
 
 - check for possible I/O errors when reading from SMTP socket,
   and distinguish error condition from normal TCP session teardown;
@@ -10060,7 +12087,7 @@ NEW FEATURES
 
   Enables checking headers of each mail for invalid (non-encoded) 8-bit
   characters, and produces a bounce (non-delivery status notification,
-  or a SMTP REJECT if desired) with the full explanation of the problem,
+  or an SMTP REJECT if desired) with the full explanation of the problem,
   with offending header fields trimmed, sanitized and included in the text.
 
   New setting $final_bad_header_destiny, defaults to D_PASS for backwards
@@ -10245,7 +12272,7 @@ Patch: amavisd-new-20030314-p1
   not applied by default), which, when applied (with patch(1) utility)
   to amavisd-new, makes it check headers of each mail for invalid
   (non-encoded) 8-bit characters, and produces a bounce (non-delivery
-  status notification, or a SMTP REJECT if desired) with the full
+  status notification, or an SMTP REJECT if desired) with the full
   explanation of the problem, with offending header fields trimmed,
   sanitized and included in the text.
 
@@ -10339,7 +12366,7 @@ BUG FIXES
   into cache as clean. This could cause tests to be bypassed for subsequent
   message with the same body but different recipients with different bypass*
   settings, but only within a lifetime of a child process (10 messages
-  by default). Noticed by Jürgen Louis Fluk, thanks!
+  by default). Noticed by JÃ¼rgen Louis Fluk, thanks!
 
 - changed caching of SQL lookups to match the documented behaviour,
   i.e. SQL lookup result is cached (for the benefit of field lookups)

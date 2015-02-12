@@ -4,7 +4,7 @@
 # This program implements a SNMP AgentX (RFC 2741) subagent for amavisd-new.
 #
 # Author: Mark Martinec <Mark.Martinec@ijs.si>
-# Copyright (C) 2009  Mark Martinec,  All Rights Reserved.
+# Copyright (C) 2009,2010,2011  Mark Martinec,  All Rights Reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
@@ -51,11 +51,11 @@ use IO::File qw(O_RDONLY O_WRONLY O_RDWR O_CREAT O_EXCL);
 use Unix::Syslog qw(:macros :subs);
 use BerkeleyDB;
 
-use vars qw($VERSION);  $VERSION = 1.003;
+use vars qw($VERSION);  $VERSION = 1.005;
 
 use vars qw($myversion $myproduct_name $myversion_id $myversion_date);
 $myproduct_name = 'amavis-agentx';
-$myversion_id = '1.3'; $myversion_date = '20090623';
+$myversion_id = '1.5'; $myversion_date = '20110117';
 $myversion = "$myproduct_name-$myversion_id ($myversion_date)";
 my($agent_name) = $myproduct_name;
 
@@ -127,7 +127,7 @@ use NetSNMP::ASN qw(:all);
 use NetSNMP::agent qw(:all);
 use NetSNMP::default_store qw(:all);
 
-my(%oidstr_to_name);
+my(%oidstr_to_obj);
 my(@oid_sorted_list);
 my($keep_running) = 1;
 my(%variables);
@@ -217,9 +217,16 @@ sub declare_variable($$;$$$) {
   # $var->oid(NetSNMP::OID->new($full_oid_str));  # later
     $var->type($type);
   # $var->suffix($suffix);
-    !exists $variables{"$name.$ind"}
-      or die "Duplicate variable name: $name.$ind";
-    $variables{"$name.$ind"} = $var;
+    $var->name("$name.$ind");
+    if (!exists $variables{"$name.$ind"}) {
+      $variables{"$name.$ind"} = $var;
+    } else {
+      # allow an amavisd variable name to map to multiple SNMP variables
+      if (ref $variables{"$name.$ind"} ne 'ARRAY') {
+        $variables{"$name.$ind"} = [ $variables{"$name.$ind"} ];
+      }
+      push(@{$variables{"$name.$ind"}}, $var);
+    }
   }
 }
 
@@ -228,27 +235,33 @@ sub set_variable_value($$) {
   my($instance); local($1,$2);
   if ($name =~ /^(.*)\.(\d+)/) { $name = $1; $instance = $2 }
   $instance = 0  if !defined $instance;
-  my($var) = $variables{"$name.$instance"};
-  if (!$var) {
-    do_log(0, "No such variable %s.%s", $name,$instance);
+  my($v) = $variables{"$name.$instance"};
+  if (!defined($v)) {
+    do_log(5, "No such variable %s.%s", $name,$instance);
   } else {
-    my($type) = $var->type;
-    if (   $name =~ /^TimeElapsed/) { $value = $value/10 }  # ms -> 0.01s ticks
-    elsif ($type == ASN_COUNTER   || $type == ASN_GAUGE     ||
-           $type == ASN_INTEGER   || $type == ASN_UNSIGNED  ||
-           $type == ASN_TIMETICKS)  { $value = 0+$value }
-    elsif ($type == ASN_COUNTER64 || $type == ASN_INTEGER64 ||
-           $type == ASN_UNSIGNED64) { $value = sprintf("%1.0f",$value) }
-    elsif ($type == ASN_OCTET_STR)  { $value = "$value" }
-    $var->value($value);
+    my(@var) = ref $v eq 'ARRAY' ? @$v : $v;
+    for my $var (@var) {
+      my($type) = $var->type;
+      if ($name =~ /^TimeElapsed/) { $value = $value/10 }  # ms -> 0.01s ticks
+      elsif ($type == ASN_COUNTER   || $type == ASN_GAUGE     ||
+             $type == ASN_INTEGER   || $type == ASN_UNSIGNED  ||
+             $type == ASN_TIMETICKS)  { $value = 0+$value }
+      elsif ($type == ASN_COUNTER64 || $type == ASN_INTEGER64 ||
+             $type == ASN_UNSIGNED64) { $value = sprintf("%1.0f",$value) }
+      elsif ($type == ASN_OCTET_STR)  { $value = "$value" }
+      $var->value($value);
+    }
   }
 }
 
 sub reset_all_variable_values($) {
   my($root_oid_str) = @_;
-  while (my($key,$var) = each(%variables)) {
-    if (!defined($root_oid_str) || $var->oidstr =~ /^\Q$root_oid_str\E\./) {
-      $var->value(undef);
+  while (my($key,$v) = each(%variables)) {
+    my(@var) = ref $v eq 'ARRAY' ? @$v : $v;
+    for my $var (@var) {
+      if (!defined($root_oid_str) || $var->oidstr =~ /^\Q$root_oid_str\E\./) {
+        $var->value(undef);
+      }
     }
   }
 }
@@ -257,11 +270,11 @@ sub dump_variables() {
   for my $oid (@oid_sorted_list) {
     my(@oidlist) = $oid->to_array;
     my($oidstr) = join('.', @oidlist);
-    my($name) = $oidstr_to_name{$oidstr};
-    my($var) = $variables{$name};
     my($descr) = "";
     my($suffix_sp) = join(' ', @oidlist[9 .. ($#oidlist-1)]);
+    my($var) = $oidstr_to_obj{$oidstr};
     my($mib_type_name) = $asn_type_to_full_name{$var->type};
+    my($name) = $var->name;
     $name =~ s/\.0\z//;
     printf STDERR (<<'END', $name, $mib_type_name, $descr, $suffix_sp);
 %s OBJECT-TYPE
@@ -277,20 +290,23 @@ END
 }
 
 sub init_data() {
-  for my $name (keys %variables) {
-    my($var) = $variables{$name};
-    $var->oid(NetSNMP::OID->new($var->oidstr));
-    $oidstr_to_name{$var->oidstr} = $name;
+  while (my($name,$v) = each(%variables)) {
+    my(@var) = ref $v eq 'ARRAY' ? @$v : $v;
+    for my $var (@var) {
+      my($oidstr) = $var->oidstr;
+      $var->oid(NetSNMP::OID->new($oidstr));
+      $oidstr_to_obj{$oidstr} = $var;
+    }
   }
   @oid_sorted_list = sort { snmp_oid_compare($a,$b) }
-                     map  { $_->oid } values(%variables);
+                      map { $_->oid }
+                      map { ref $_ eq 'ARRAY' ? @$_ : $_ } values(%variables);
   # build a linked list of variable objects in OID sorted order
   # to speed up sequential MIB traversal by getnext
   my($prev_var);
   for my $oid (@oid_sorted_list) {
     my($oidstr) = join('.', $oid->to_array);
-    my($name) = $oidstr_to_name{$oidstr};
-    my($var) = $variables{$name};
+    my($var) = $oidstr_to_obj{$oidstr};
     $prev_var->next($var)  if defined $prev_var;
     $prev_var = $var;
   }
@@ -382,7 +398,7 @@ sub update_data($) {
   do_log(3, "updating variables from %s", $database->{name});
   my($start_time) = Time::HiRes::time;
   if ($database->{name} =~ /^pf/) {
-    # not really a database file, just a 'view' into a MTA spool directory
+    # not really a database file, just a 'view' into an MTA spool directory
     my($dir) = $database->{file};
     my($cnt,$aborted) =
       count_files_in_postfix_dir("$mta_queue_dir/$dir", $start_time + 5);
@@ -576,17 +592,14 @@ sub snmp_handler($$$$) {
         do_log(4, "Last: %s", $oid_in_request);
       } else {
         # check first for a sequential traversal, likely faster
-        my($this_name) = $oidstr_to_name{join('.', $oid_in_request->to_array)};
-        if (defined $this_name) {
-          my($var) = $variables{$this_name};
-          if ($var) {
-            my($next_var) = $var->next;
-            if (!$next_var) {
-              $eom = 1;  # end of MIB
-            } else {
-              $actual_oid = $next_var->oid;
-              $req->setOID($actual_oid);
-            }
+        my($var) = $oidstr_to_obj{join('.', $oid_in_request->to_array)};
+        if ($var) {
+          my($next_var) = $var->next;
+          if (!$next_var) {
+            $eom = 1;  # end of MIB
+          } else {
+            $actual_oid = $next_var->oid;
+            $req->setOID($actual_oid);
           }
         }
         if (!$err && !defined $actual_oid) {  # fall back to a binary search
@@ -613,8 +626,8 @@ sub snmp_handler($$$$) {
       do_log(5, "No more MIB beyond %s", $oid_in_request);
     } else {
       my($oid_str) = join('.', $actual_oid->to_array);
-      my($name) = $oidstr_to_name{$oid_str};
-      if (!defined $name) {
+      my($var) = $oidstr_to_obj{$oid_str};
+      if (!$var) {
         $req->setError($request_info, SNMP_ERR_NOSUCHNAME);
       } else {
         # find out under which OID root the query falls
@@ -632,8 +645,7 @@ sub snmp_handler($$$$) {
             }
           }
         }
-        my($var) = $variables{$name};
-        my($type,$value) = ($var->type, $var->value);
+        my($type, $value, $name) = ($var->type, $var->value, $var->name);
         if (!defined $type) {
           $req->setError($request_info, SNMP_ERR_BADVALUE);
         } else {
@@ -806,6 +818,7 @@ EOD
     declare_variable("$r.2.5",     'InMsgsOriginating');       # orig=1 locl=x
     declare_variable("$r.2.6",     'InMsgsOpenRelay');         # orig=0 locl=0
 
+    # these have duplicates at $r.{19..26}.1, except InMsgsStatusRelayed
     declare_variable("$r.2.7",     'InMsgsStatusAccepted');    # 2xx, AM.PDP
     declare_variable("$r.2.8",     'InMsgsStatusRelayed');     # 2xx, forward
     declare_variable("$r.2.9",     'InMsgsStatusDiscarded');   # 2xx, no DSN
@@ -1043,6 +1056,84 @@ EOD
     declare_variable("$r.16.5",    'TimeElapsedPenPals',   'INT');
     declare_variable("$r.16.6",    'TimeElapsedVirusCheck','INT');
     declare_variable("$r.16.7",    'TimeElapsedSpamCheck', 'INT');
+
+    declare_variable("$r.17.1",    'UserCounter1',         'C64');
+    declare_variable("$r.17.2",    'UserCounter2',         'C64');
+    declare_variable("$r.17.3",    'UserCounter3',         'C64');
+    declare_variable("$r.17.4",    'UserCounter4',         'C64');
+    declare_variable("$r.17.5",    'UserCounter5',         'C64');
+    declare_variable("$r.17.6",    'UserCounter6',         'C64');
+    declare_variable("$r.17.7",    'UserCounter7',         'C64');
+    declare_variable("$r.17.8",    'UserCounter8',         'C64');
+    declare_variable("$r.17.9",    'UserCounter9',         'C64');
+    declare_variable("$r.17.10",   'UserCounter10',        'C64');
+
+    declare_variable("$r.18.1",    'UserGauge1',           'G32');
+    declare_variable("$r.18.2",    'UserGauge2',           'G32');
+    declare_variable("$r.18.3",    'UserGauge3',           'G32');
+    declare_variable("$r.18.4",    'UserGauge4',           'G32');
+    declare_variable("$r.18.5",    'UserGauge5',           'G32');
+    declare_variable("$r.18.6",    'UserGauge6',           'G32');
+    declare_variable("$r.18.7",    'UserGauge7',           'G32');
+    declare_variable("$r.18.8",    'UserGauge8',           'G32');
+    declare_variable("$r.18.9",    'UserGauge9',           'G32');
+    declare_variable("$r.18.10",   'UserGauge10',          'G32');
+
+    declare_variable("$r.19.1",    'InMsgsStatusAccepted');    # 2xx, AM.PDP
+    declare_variable("$r.19.2",    'InMsgsStatusAcceptedInbound');
+    declare_variable("$r.19.3",    'InMsgsStatusAcceptedOutbound');
+    declare_variable("$r.19.4",    'InMsgsStatusAcceptedInternal');
+    declare_variable("$r.19.5",    'InMsgsStatusAcceptedOriginating');
+    declare_variable("$r.19.6",    'InMsgsStatusAcceptedOpenRelay');
+
+    declare_variable("$r.20.1",    'InMsgsStatusRelayedUntagged');  # 2xx, fwd
+    declare_variable("$r.20.2",    'InMsgsStatusRelayedUntaggedInbound');
+    declare_variable("$r.20.3",    'InMsgsStatusRelayedUntaggedOutbound');
+    declare_variable("$r.20.4",    'InMsgsStatusRelayedUntaggedInternal');
+    declare_variable("$r.20.5",    'InMsgsStatusRelayedUntaggedOriginating');
+    declare_variable("$r.20.6",    'InMsgsStatusRelayedUntaggedOpenRelay');
+
+    declare_variable("$r.21.1",    'InMsgsStatusRelayedTagged'); # 2xx, forward
+    declare_variable("$r.21.2",    'InMsgsStatusRelayedTaggedInbound');
+    declare_variable("$r.21.3",    'InMsgsStatusRelayedTaggedOutbound');
+    declare_variable("$r.21.4",    'InMsgsStatusRelayedTaggedInternal');
+    declare_variable("$r.21.5",    'InMsgsStatusRelayedTaggedOriginating');
+    declare_variable("$r.21.6",    'InMsgsStatusRelayedTaggedOpenRelay');
+
+    declare_variable("$r.22.1",    'InMsgsStatusDiscarded');   # 2xx, no DSN
+    declare_variable("$r.22.2",    'InMsgsStatusDiscardedInbound');
+    declare_variable("$r.22.3",    'InMsgsStatusDiscardedOutbound');
+    declare_variable("$r.22.4",    'InMsgsStatusDiscardedInternal');
+    declare_variable("$r.22.5",    'InMsgsStatusDiscardedOriginating');
+    declare_variable("$r.22.6",    'InMsgsStatusDiscardedOpenRelay');
+
+    declare_variable("$r.23.1",    'InMsgsStatusNoBounce');    # 2xx, no DSN
+    declare_variable("$r.23.2",    'InMsgsStatusNoBounceInbound');
+    declare_variable("$r.23.3",    'InMsgsStatusNoBounceOutbound');
+    declare_variable("$r.23.4",    'InMsgsStatusNoBounceInternal');
+    declare_variable("$r.23.5",    'InMsgsStatusNoBounceOriginating');
+    declare_variable("$r.23.6",    'InMsgsStatusNoBounceOpenRelay');
+
+    declare_variable("$r.24.1",    'InMsgsStatusBounced');     # 2xx, DSN sent
+    declare_variable("$r.24.2",    'InMsgsStatusBouncedInbound');
+    declare_variable("$r.24.3",    'InMsgsStatusBouncedOutbound');
+    declare_variable("$r.24.4",    'InMsgsStatusBouncedInternal');
+    declare_variable("$r.24.5",    'InMsgsStatusBouncedOriginating');
+    declare_variable("$r.24.6",    'InMsgsStatusBouncedOpenRelay');
+
+    declare_variable("$r.25.1",    'InMsgsStatusRejected');    # 5xx
+    declare_variable("$r.25.2",    'InMsgsStatusRejectedInbound');
+    declare_variable("$r.25.3",    'InMsgsStatusRejectedOutbound');
+    declare_variable("$r.25.4",    'InMsgsStatusRejectedInternal');
+    declare_variable("$r.25.5",    'InMsgsStatusRejectedOriginating');
+    declare_variable("$r.25.6",    'InMsgsStatusRejectedOpenRelay');
+
+    declare_variable("$r.26.1",    'InMsgsStatusTempFailed');  # 4xx
+    declare_variable("$r.26.2",    'InMsgsStatusTempFailedInbound');
+    declare_variable("$r.26.3",    'InMsgsStatusTempFailedOutbound');
+    declare_variable("$r.26.4",    'InMsgsStatusTempFailedInternal');
+    declare_variable("$r.26.5",    'InMsgsStatusTempFailedOriginating');
+    declare_variable("$r.26.6",    'InMsgsStatusTempFailedOpenRelay');
   }
 
   { # amavisd child processes MIB

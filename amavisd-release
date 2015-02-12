@@ -10,11 +10,11 @@
 #
 # To be placed in amavisd.conf:
 #   $interface_policy{'SOCK'} = 'AM.PDP';
-#   $policy_bank{'AM.PDP'} = {protocol=>'AM.PDP'};
-#   $unix_socketname='/var/amavis/amavisd.sock';
+#   $policy_bank{'AM.PDP'} = { protocol=>'AM.PDP' };
+#   $unix_socketname = '/var/amavis/amavisd.sock';
 #or:
 #   $interface_policy{'9998'} = 'AM.PDP';
-#   $policy_bank{'AM.PDP'} = {protocol=>'AM.PDP'};
+#   $policy_bank{'AM.PDP'} = { protocol=>'AM.PDP' };
 #   $inet_socket_port = [10024,9998];
 #
 # To obtain secret_id and quar_type belonging to some mail_id:
@@ -32,7 +32,7 @@
 # using socket protection (unix socket) or @inet_acl (for inet socket).
 #
 # Author: Mark Martinec <mark.martinec@ijs.si>
-# Copyright (C) 2005-2008  Mark Martinec,  All Rights Reserved.
+# Copyright (C) 2005-2011  Mark Martinec,  All Rights Reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
@@ -74,7 +74,7 @@ use re 'taint';
 use IO::Socket;
 use Time::HiRes ();
 
-use vars qw($VERSION);  $VERSION = 1.500;
+use vars qw($VERSION);  $VERSION = 1.510;
 use vars qw($log_level $socketname);
 
   $log_level = 1;
@@ -97,8 +97,14 @@ sub sanitize_str {
   $str;
 }
 
-sub do_log($$) {
-  my($level, $errmsg) = @_;
+sub ll($) {
+  my($level) = @_;
+  $level <= $log_level;
+}
+
+sub do_log($$;@) {
+  my($level, $errmsg, @args) = @_;
+  $errmsg = sprintf($errmsg,@args)  if @args;
   print STDERR sanitize_str($errmsg),"\n"  if $level <= $log_level;
 }
 
@@ -148,7 +154,7 @@ sub release_file($$$@) {
   my($fn_path,$fn_prefix,$mail_id,$fn_suffix,$part_tag); local($1,$2,$3,$4);
   $part_tag = $1  if $mail_file =~ s/ \[ ( [^\]]* ) \] \z//xs;
   if ($mail_file =~ m{^ ([^/].*/)? ([A-Z0-9][A-Z0-9._-]*[_-])?
-                        ([A-Z0-9][A-Z0-9_+-]{10}[A-Z0-9]) (\.gz)? \z}xsi) {
+                        ([A-Z0-9][A-Z0-9_+-]{10,14}[A-Z0-9]) (\.gz)? \z}xsi) {
     ($fn_path,$fn_prefix,$mail_id,$fn_suffix) = ($1,$2,$3,$4);
   } elsif ($mail_file =~ m{^ ([^/].*/)? () ([A-Za-z0-9$._=+-]+?) (\.gz)?\z}xs){
     ($fn_path,$fn_prefix,$mail_id,$fn_suffix) = ($1,$2,$3,$4);  # old style
@@ -156,26 +162,27 @@ sub release_file($$$@) {
     usage("Invalid quarantine ID: $mail_file");
   }
   my($quar_type) =
-    $fn_suffix eq '.gz' ? 'Z'
-    : $fn_path eq '' && $mail_id eq $mail_file ? 'Q' : 'F';
+    $fn_suffix eq '.gz' ? 'Z' : $fn_path ne '' ? 'F' : '';
   my($request_type) = $0 =~ /\breport\z/i  ? 'report'
                     : $0 =~ /\brequeue\z/i ? 'requeue' : 'release';
-  my(@query) = (
-    "request=$request_type",
-    "quar_type=$quar_type",
-    "mail_id=$mail_id",
-  );
-  push(@query, "secret_id=$secret_id")    if $secret_id ne '';
-  push(@query, "mail_file=$mail_file")    if $quar_type =~ /^[FZB]\z/;
+  my(@query);
+  push(@query, "request=$request_type");
+  push(@query, "mail_id=$mail_id");
+  push(@query, "quar_type=$quar_type")  if $quar_type ne '';
+  push(@query, "secret_id=$secret_id")  if $secret_id ne '';
+  push(@query, "mail_file=$mail_file");  # ignored with an SQL quarantine
   push(@query, "partition_tag=$part_tag") if $part_tag ne '';
   if (@alt_recips) {  # override original recipients if list is nonempty
     push(@query, map {"recipient=$_"} @alt_recips);
   }
   my($attr_ref) = ask_amavisd($sock,\@query);
   $attr_ref && %$attr_ref  or die "Invalid response received";
-  for my $attr_name (keys %$attr_ref) {
-    for my $attr_val (@{$attr_ref->{$attr_name}})
-      { do_log(2,"< $attr_name=$attr_val") }
+  if (ll(2)) {
+    for my $attr_name (keys %$attr_ref) {
+      for my $attr_val (@{$attr_ref->{$attr_name}}) {
+        do_log(2,"< %s=%s", $attr_name,$attr_val);
+      }
+    }
   }
   do_log(0,$_)  for (@{$attr_ref->{'setreply'}});
   # may do another release request on the same session if needed ...

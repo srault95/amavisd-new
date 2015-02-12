@@ -3,7 +3,8 @@ LOOKUP MAPS (hash, SQL) AND ACCESS LISTS EXPLAINED
    Updated: 2002-04, 2002-06, 2002-11, 2002-12,
             2003-03, 2003-05, 2003-06, 2003-09, 2003-12,
             2004-01, 2004-03, 2004-12,
-            2005-01, 2005-03, 2005-05, 2005-08
+            2005-01, 2005-03, 2005-05, 2005-08,
+            2010-10
    Mark Martinec <Mark.Martinec@ijs.si>
 
 (applies to the semantics of amavisd.conf variables such as:
@@ -110,7 +111,7 @@ For arguments to subroutine lookup() of type hash-ref, the argument
 is passed to subroutine lookup_hash(), which does a lookup into
 a Perl hash.
 
-Hash lookups (e.g. for user+foo@sub.example.com) are performed in the
+Hash lookups (e.g. for User+foo@Sub.Example.com) are performed in the
 following order:
  - lookup for user+foo@sub.example.com
  - lookup for user@sub.example.com (only if $recipient_delimiter is '+')
@@ -125,9 +126,10 @@ following order:
 The search sequence stops as soon as a match is found, and the value
 of the matched entry determines the result.
 
-The domain part is always matched case-insensitively, the localpart
-is matched case-sensitively when $localpart_is_case_sensitive
-is true (not case-sensitive by default).
+The domain part of a key is always lowercased, the localpart is lowercase
+when $localpart_is_case_sensitive is true (not case-sensitive by default).
+The keys in a hash should match the case of a key, i.e. should typically
+be entirely in lowercase.
 
 A field value undef implies that the next lookup table (if there are more)
 is to be tried. In plain words, undef means "this table does not know
@@ -299,8 +301,6 @@ if by calling provided routines read_array or read_hash, e.g.:
 or:
   @mynetworks_maps = (read_hash('/etc/amavisd-mynetworks'), \@mynetworks);
 
-More examples at amavisd.conf-sample.
-
 
 REGULAR EXPRESSION LOOKUPS
 
@@ -391,22 +391,22 @@ no attempts to use SQL for lookups will be made, and no code to use DBI
 will be loaded or compiled (if @storage_sql_dsn is empty as well).
 
 For arguments to subroutine lookup() of type Amavis::Lookup::SQLfield
-(objects), the object is passed to method lookup_sql_field, which does
-a lookup into a SQL table by using Perl module DBI.
+(objects), the object is passed to a method lookup_sql_field, which does
+a lookup into an SQL table by using Perl module DBI.
 
-SQL 'select' requests all available fields from the specified tables,
+An SQL 'select' requests all available fields from the specified tables,
 and the result is cached (just for this mail message processing).
 Individual fields can be extracted one at a time from this cache
 very quickly, so there is no penalty in using several calls to lookup
 for different fields (for the same key) in different parts of the program.
 
-lookup_sql() performs a lookup for an e-mail address against a SQL map.
+lookup_sql() performs a lookup for an e-mail address against an SQL map.
 If a match is found it returns whatever the map returns (a reference
 to a hash containing values of requested fields), otherwise returns undef.
 A match aborts further fetching sequence.
 
 lookup_sql_field() also performs a lookup for an e-mail address against
-a SQL map. It first calls lookup_sql() if it hasn't been called yet for
+an SQL map. It first calls lookup_sql() if it hasn't been called yet for
 this key, requesting it to return all matching records. Instead of returning
 the whole record as lookup_sql does, it returns just a value of one particular
 table field, the first one with a defined (non-NULL) value from the list
@@ -415,11 +415,14 @@ of matching records (or undef if there are none).
 The lookup_sql_field() is the subroutine that gets called from lookup()
 for arguments (objects) of type Amavis::Lookup::SQLfield.
 
-The field value NULL is translated to Perl undef, which according
-to lookup rules implies that the next lookup table (if there are more)
-is to be tried. In plain words, NULL means "this table does not know
-the answer, try the next one". Further searching in this table
-(e.g. for more general defaults) is terminated.
+A field value NULL is translated to a Perl undef, and is treated the same
+as a nonexistent field of the specified name. For any field (apart from
+the only exception field 'local') a record with a NULL/undef/nonexistent
+field is skipped and search continues with the next, more general,
+matching record until a defined value is found or all matching records are
+checked. The only exception is a field named 'local', where a nonexistent
+field on an otherwise matching record implies a value true - see section
+"Special handling of optional SQL field 'users.local'" further down.
 
 Boolean fields are usually represented as a single character (instead of
 an integer) to minimize storage. Characters N,n,F,f,0,NUL and SPACE
@@ -429,30 +432,35 @@ are ignored. It is customary to use Y for true and N for false.
 SQL lookups (e.g. for user+foo@example.com) are performed in order
 which is usually specified by 'ORDER BY...DESC' in the SELECT statement;
 otherwise the order is unspecified, which is only useful if just specific
-entries exist in a database (e.g. full address always, not only domain part
-or mailbox part).
+entries exist in a database (e.g. full address always, not domain part only
+or mailbox parts only).
 
 The following order (implemented by sorting on the 'priority' field
 in DESCending order, zero is low priority) is recommended, to follow
-the same specific-to-general principle as in other lookup tables:
+the same specific-to-general principle as in other lookup tables;
+the first column is a suggested priority (the exact value does not matter
+as long as the order is maintained):
 
- - lookup for user+foo@example.com
- - lookup for user@example.com (only if $recipient_delimiter is '+')
- - lookup for user+foo (only if domain part is local)
- - lookup for user     (only local; only if $recipient_delimiter is '+')
- - lookup for @example.com
- - lookup for @.example.com
- - lookup for @.com
- - lookup for @.       (catchall)
+9 - lookup for user+foo@sub.example.com
+8 - lookup for user@sub.example.com (only if $recipient_delimiter is '+')
+7 - lookup for user+foo (only if domain part is local)
+6 - lookup for user     (only local; only if $recipient_delimiter is '+')
+5 - lookup for @sub.example.com
+3 - lookup for @.sub.example.com
+2 - lookup for @.example.com
+1 - lookup for @.com
+0 - lookup for @.       (catchall)
 
 NOTE:
  this is different from hash and ACL lookups in two important aspects:
-   - key without '@' implies mailbox name, not domain name;
-   - a naked mailbox name lookups (without '@', e.g. 'user') are only
+   - key without '@' implies a mailbox name, not a domain name;
+   - naked mailbox name lookups (without an '@', e.g. 'user') are only
      performed when the mail address matches local_domains lookups.
 
 The domain part is always lowercased when constructing a key,
 the localpart is not lowercased when $localpart_is_case_sensitive is true.
+With SQL datatypes CHAR and VARCHAR this does not matter anyway, as such
+fields are matched case-insensitively.
 
 NOTE: a null reverse path e-mail address used by MTA for delivery status
 notifications (DSN) has empty local part and empty domain. As far as the

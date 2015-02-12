@@ -122,8 +122,17 @@ EOD
             $src_ip = $1; $src_port = $2;
             if ($src_ip =~ /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\z/) {
               # IPv4
-            } elsif ($src_ip =~ /^ (?: IPv6: )? [0-9a-f]{0,4}
-                       (?: : [0-9a-f]{0,4} | \. [0-9]{1,3} ){2,8} \z/xsi) {
+            } elsif ($src_ip =~ /^
+                       (?: (?: IPv6: )? 0{0,4} (?: : 0{0,4} ){1,4} : FFFF : )?
+                       ( \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3} )\z/xsi) {
+              $src_ip = $1;  # IPv4-mapped IPv6 address, alternative dec, form
+            } elsif ($src_ip =~ /^ (?: IPv6: )?
+                                   [0-9a-f]{0,4} (?: : [0-9a-f]{0,4} ){2,7}
+                                 \z/xsi) {
+              $src_ip =~ s/^IPv6://i;
+            } elsif ($src_ip =~ /^ (?: IPv6: )?
+                                   [0-9a-f]{0,4} (?: : [0-9a-f]{0,4} ){2,5} :
+                                   \d{1,3} (?: \. \d{1,3} ){3} \z/xsi) {
               $src_ip =~ s/^IPv6://i;
             } else { undef $src_ip }
           }

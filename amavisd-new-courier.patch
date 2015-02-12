@@ -1,27 +1,27 @@
---- amavisd.ori	2009-06-25 14:36:06.000000000 +0200
-+++ amavisd	2009-06-25 14:36:14.000000000 +0200
-@@ -98,5 +98,5 @@
- #  Amavis::In::AMCL
+--- amavisd.ori	2011-07-01 18:18:08.952738010 +0200
++++ amavisd	2011-07-01 18:18:17.410664981 +0200
+@@ -101,5 +101,5 @@
+ #  Amavis::In::AMPDP
  #  Amavis::In::SMTP
 -#( Amavis::In::Courier )
 +#  Amavis::In::Courier
  #  Amavis::Out::SMTP::Protocol
  #  Amavis::Out::SMTP::Session
-@@ -219,5 +219,5 @@
+@@ -224,5 +224,5 @@
    fetch_modules('REQUIRED BASIC MODULES', 1, qw(
      Exporter POSIX Fcntl Socket Errno Carp Time::HiRes
 -    IO::Handle IO::File IO::Socket IO::Socket::UNIX IO::Socket::INET
 +    IO::Handle IO::File IO::Select IO::Socket IO::Socket::UNIX IO::Socket::INET
      IO::Stringy Digest::MD5 Unix::Syslog File::Basename
      Compress::Zlib MIME::Base64 MIME::QuotedPrint MIME::Words
-@@ -9249,5 +9249,5 @@
- ### but before binding to sockets
+@@ -10795,5 +10795,5 @@
+ #
  sub post_configure_hook {
 -# umask(0007);  # affect protection of Unix sockets created by Net::Server
 +  umask(0007);  # affect protection of Unix sockets created by Net::Server
  }
  
-@@ -9260,4 +9260,34 @@
+@@ -10822,4 +10822,34 @@
  
  ### Net::Server hook
 +### This hook takes place immediately after the "->run()" method is called.
@@ -56,7 +56,7 @@
 +### Net::Server hook
  ### This hook occurs in the parent (master) process after chroot,
  ### after change of user, and change of group has occured.
-@@ -9312,4 +9342,15 @@
+@@ -10874,4 +10904,15 @@
      }
      $spamcontrol_obj->init_pre_fork  if $spamcontrol_obj;
 +    if ($courierfilter_shutdown) {
@@ -70,10 +70,10 @@
 +        POSIX::close(3);
 +      }
 +    }
-     my(@modules_extra) = grep {!exists $modules_basic{$_}} keys %INC;
+     my(@modules_extra) = grep(!exists $modules_basic{$_}, keys %INC);
      if (@modules_extra) {
-@@ -9674,5 +9715,7 @@
-       $amcl_in_obj->process_policy_request($sock, $conn, \&check_mail, 0);
+@@ -11313,5 +11354,7 @@
+       $ampdp_in_obj->process_policy_request($sock, $conn, \&check_mail, 0);
      } elsif ($suggested_protocol eq 'COURIER') {
 -      die "unavailable support for protocol: $suggested_protocol";
 +      # courierfilter client
@@ -81,7 +81,7 @@
 +      $courier_in_obj->process_courier_request($sock, $conn, \&check_mail);
      } elsif ($suggested_protocol eq 'QMQPqq') {
        die "unavailable support for protocol: $suggested_protocol";
-@@ -9752,4 +9795,24 @@
+@@ -11392,4 +11435,24 @@
  }
  
 +### Net::Server hook
@@ -106,8 +106,8 @@
 +
  ### Child is about to be terminated
  ### user customizable Net::Server hook
-@@ -13614,4 +13677,9 @@
- Amavis::Conf::supply_after_defaults();
+@@ -15625,4 +15688,9 @@
+ undef $Amavis::Conf::log_verbose_templ;
  
 +# courierfilter shutdown needs can_read_hook, added in Net::Server 0.90
 +if ($courierfilter_shutdown && Net::Server->VERSION < 0.90) {
@@ -116,14 +116,14 @@
 +
  if (defined $desired_user && $daemon_user ne '') {
    local($1);
-@@ -14083,4 +14151,6 @@
-                                                           : $inet_socket_bind),
-     listen => defined $listen_queue_size ? $listen_queue_size : undef,
+@@ -16191,4 +16259,6 @@
+     host => $bind_to[0],  # default bind, redundant, merged to @listen_sockets
+     listen => $listen_queue_size, # undef for a default
 +    # need to set multi_port for can_read_hook
 +    multi_port => $courierfilter_shutdown ? 1 : undef,
      max_servers => $max_servers,  # number of pre-forked children
      !defined($min_servers) ? ()
-@@ -17041,5 +17111,424 @@
+@@ -19239,5 +19309,424 @@
  no warnings 'uninitialized';
  
 -BEGIN { die "Code not available for module Amavis::In::Courier" }
@@ -549,38 +549,3 @@
 +}
  
  1;
---- amavisd.conf-sample.ori	2009-06-25 14:35:59.000000000 +0200
-+++ amavisd.conf-sample	2009-06-25 14:36:14.000000000 +0200
-@@ -148,4 +148,11 @@
- #$notify_method = $forward_method;
- 
-+# COURIER using courierfilter
-+#$forward_method = undef;  # no explicit forwarding, Courier does it itself
-+#$notify_method = 'pipe:flags=q argv=perl -e $pid=fork();if($pid==-1){exit(75)}elsif($pid==0){exec(@ARGV)}else{exit(0)} /usr/sbin/sendmail -f ${sender} -- ${recipient}';
-+# Only set $courierfilter_shutdown to 1 if you are using courierfilter to
-+# control the startup and shutdown of amavis
-+#$courierfilter_shutdown = 1; # (default 0)
-+
- # prefer to collect mail for forwarding as BSMTP files?
- #$forward_method = "bsmtp:$MYHOME/out-%i-%n.bsmtp";
-@@ -221,5 +228,5 @@
- 			          # (default is true)
- 
--# AMAVIS-CLIENT PROTOCOL INPUT SETTINGS (e.g. with amavisd-release, or
-+# AMAVIS-CLIENT AND COURIER PROTOCOL INPUT SETTINGS (e.g. amavisd-release, or
- #   sendmail milter through helper clients like amavis-milter.c and amavis.c)
- #   option(s) -p overrides $inet_socket_port and $unix_socketname
-@@ -227,4 +234,5 @@
- #$unix_socketname = undef;        # disable listening on a unix socket
-                                   # (default is undef, i.e. disabled)
-+#$unix_socketname = "/var/lib/courier/allfilters/amavisd"; # Courier socket
-                                   # (usual setting is $MYHOME/amavisd.sock)
- 
-@@ -2508,4 +2516,7 @@
- # };
- 
-+# Needed for Courier: speak courier protocol on the socket
-+#$interface_policy{'SOCK'} = 'AM-SOCK';
-+#$policy_bank{'AM-SOCK'} = {protocol => 'COURIER'};
- 
- ## Now we can assign policy banks to amavisd tcp port numbers listed in

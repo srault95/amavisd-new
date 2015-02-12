@@ -302,18 +302,20 @@ of the recipient and his LDA and MUA.</p>
 <h2><a name="quarantine">Quarantine</a></h2>
 
 <p>Mail quarantining is attempted when enabled for a given contents category,
-which usually includes infected or banned or spam mail with score for
+which usually includes infected, or banned, or spam mail with score for
 at least one of its recipients at or above his kill level. It is also
 possible to enable quarantining of clean messages for archiving or
 troubleshooting purposes. The <i>*quarantine_to</i> for each recipient
-(when nonempty), along with a global corresponding <i>*_quarantine_method</i>,
+(when nonempty), along with a corresponding global <i>*_quarantine_method</i>,
 determines where the quarantine location should be.</p>
+
+<h3><a name="quarantine_method">quarantine_method</a></h3>
 
 <p>The <i>*_quarantine_method</i> can be considered a static and a site-wide
 setting, generally controlling a format and location of the quarantine
 on the system. The <i>*quarantine_to</i> can be considered a dynamic
 part of the quarantine location, possibly affected by per-recipient settings
-and the class of malware (contents category). It serves to fully specify
+and the type of malware (contents category). It serves to fully specify
 the final location, e.g. a file or a mailbox.</p>
 
 <p>Depending on mail contents category (type of malware), the following
@@ -341,10 +343,31 @@ variables. A nonempty string should follow a syntax:</p>
 usual methods for quarantining. The <tt>smtp:</tt> or <tt>lmtp:</tt> methods
 are only useful for quarantining if quarantine location is some dedicated
 mailbox instead of a local file or directory. The <tt>smtp:</tt>, <tt>lmtp:</tt>
-and <tt>pipe:</tt> methods are more often used for forwarding and notifications.
-The following features became available with version 2.5.0: the <tt>lmtp:</tt>
-method, support for IPv6, and specifying a Unix socket to a <tt>smtp:</tt> or
-<tt>lmtp:</tt> method.</p>
+and <tt>pipe:</tt> methods are more often used for forwarding and notifications,
+and only rarely for quarantining. The following features became available with
+version 2.5.0: the <tt>lmtp:</tt> method, support for IPv6, and specifying a
+Unix socket to a <tt>smtp:</tt> or <tt>lmtp:</tt> method.</p>
+
+<p>When quarantine method starts with <tt>local:</tt>, the rest of the
+string is a <i>filename-template</i>, which serves to specify a file name
+to store a quarantined message. The template may contain placeholders
+which are composed of a percent character, followed by exactly one
+character. The following expansions are recognized:</p>
+
+<ul>
+<li><tt>%b</tt> is replaced by $msginfo->body_digest</li>
+<li><tt>%P</tt> is replaced by $msginfo->partition_tag</li>
+<li><tt>%m</tt> is replaced by $msginfo->mail_id</li>
+<li><tt>%n</tt> is replaced by $msginfo->log_id</li>
+<li><tt>%i</tt> is replaced by ISO 8601 timestamp of a mail reception time</li>
+<li><tt>%%</tt> is replaced by a single %</li>
+</ul>
+
+<p>If a <i>filename-template</i> ends up in <tt>.gz</tt>, the resulting
+file will be gzip-compressed.</p>
+
+
+<h3><a name="quarantine_to">quarantine_to</a></h3>
 
 <p>Depending on the method specified (local/bsmtp/smtp/sql) a per-recipient
 setting <i>*quarantine_to</i> adopts different semantics and syntax,
@@ -428,11 +451,6 @@ possibly modified by the configuration variable <tt>$QUARANTINEDIR</tt>.</p>
   <td>anything (nonempty)</td>
   <td>anything</td>
   <td>stored into SQL database specified by @storage_sql_dsn</td></tr>
-<tr>
-  <td><tt>sql:</tt></td>
-  <td>empty or undef</td>
-  <td>anything</td>
-  <td>not quarantined</td></tr>
 </table>
 
 <p>The <i>*quarantine_to</i> is currently quite limited in functionality,
@@ -962,8 +980,7 @@ settings are in the bank named in the $interface_policy{$port} if any,
 and finally the policy bank named 'MYNETS' (i.e. settings from
 $policy_bank{'MYNETS'}) is overlaid if such policy bank exists and the SMTP
 client IP address is known (by XFORWARD SMTP extension command from MTA)
-and it matches the current mynetworks_maps. See amavisd.conf-sample for
-examples.</p>
+and it matches the current mynetworks_maps.</p>
 
 <p>When a new policy bank is overlaid over an existing set of configuration
 variables, the variables not present in the new policy bank retain their
@@ -1241,13 +1258,12 @@ content_filter=amavisfeed:[127.0.0.1]:10044
 # note that permit_mynetworks only checks for key presence and ignores rhs
 mynetworks = cidr:/etc/postfix/mynetworks-filter.cidr
 
-smtpd_recipient_restrictions =
-  reject_unauth_pipelining, reject_non_fqdn_recipient, reject_non_fqdn_sender,
-  reject_unknown_recipient_domain, reject_unknown_sender_domain,
-  check_client_access cidr:/etc/postfix/mynetworks-filter.cidr,
-  permit_mynetworks,
-  permit_sasl_authenticated, permit_tls_clientcerts,
-  reject_unauth_destination,
+smtpd_sender_restrictions =
+  ... the usual rejects if any ...
+  check_client_access cidr:/etc/postfix/mynetworks-filter.cidr
+  permit_mynetworks
+  permit_sasl_authenticated
+  permit_tls_clientcerts
   check_sender_access regexp:/etc/postfix/filter-catchall.regexp
 </pre>
 
@@ -1911,9 +1927,9 @@ of per-policy-bank settings is available. See description of a new
 configuration variable @author_to_policy_bank_maps in release
 notes.</li>
 
-<li>To each message passed to local recipients amavisd inserts a header field
-<i>Authentication-Results</i> (according to draft-kucherawy-sender-auth-header)
-for each signature found in a message, reporting a verification result.
+<li>To each message passed to local recipients amavisd inserts a header
+field <i>Authentication-Results</i> (according to RFC 5451) for each
+signature found in a message, reporting a verification result.
 These header fields can reliably tell a recipient or his MUA what domains
 claimed responsibility for a message, or can be used for troubleshooting
 DKIM signing, verification and tracking mail transformations.</li>
@@ -1942,14 +1958,9 @@ sending addresses, and bounces to possibly fake addresses can be minimized.
 More information on the 'sender_credible' attribute can be found in release notes.</li>
 </ul>
 
-<p>Currently the ADSP (Author Domain Signing Practices, formerly SSP) draft
-is not implemented, neither by amavisd, nor by SpamAssassin's plugin DKIM.
-Until it settles and comes into wider use one needs to resort to SpamAssassin
-rules to block fake mail with no valid signature from domains which are known
-to be signing all their mail, such as PayPal, eBay, alert.bankofamerica.com,
-and others. In essence, the ADSP information (usually inferred, or actually
-published (quite rare today)) from such domains needs to be encoded into
-SpamAssassin rules.</p>
+<p>Currently the ADSP (RFC 5617, Author Domain Signing Practices, formerly SSP)
+is not implemented by amavisd, but is implemented in the SpamAssassin's plugin
+DKIM as of version 3.3.0.</p>
 
 
 <h3><a name="dkim-am-sign">Setting up DKIM signing in amavisd</a></h3>
@@ -2365,16 +2376,25 @@ frequent clients.</p>
 <ul>
 <li><a href="http://www.dkim.org/info/dkim-faq.html">DKIM
   Frequently Asked Questions</a> (at MIPA)</li>
-<li><a href="http://www.rfc-editor.org/rfc/rfc4686.txt">RFC 4686</a>:
-  Analysis of Threats Motivating DomainKeys Identified Mail (DKIM)</li>
 <li><a href="http://www.rfc-editor.org/rfc/rfc4871.txt">RFC 4871</a>:
   DomainKeys Identified Mail (DKIM) Signatures</li>
+<li><a href="http://www.rfc-editor.org/rfc/rfc5672.txt">RFC 5672</a>:
+  RFC 4871 DomainKeys Identified Mail (DKIM) Signatures -- Update</li>
 <li><a href="http://www.rfc-editor.org/rfc/rfc4870.txt">RFC 4870</a>:
   (historical document) Domain-Based Email Authentication Using
   Public Keys Advertised in the DNS (DomainKeys)</li>
+<li><a href="http://www.rfc-editor.org/rfc/rfc5617.txt">RFC 5617</a>:
+  DKIM Author Domain Signing Practices (ADSP)</li>
+<li><a href="http://www.rfc-editor.org/rfc/rfc4686.txt">RFC 4686</a>:
+  Analysis of Threats Motivating DomainKeys Identified Mail (DKIM)</li>
 <li><a href="http://www.rfc-editor.org/rfc/rfc5016.txt">RFC 5016</a>:
   Requirements for a DomainKeys Identified Mail (DKIM) Signing Practices
   Protocol</li>
+<li><a href="http://www.rfc-editor.org/rfc/rfc5585.txt">RFC 5585</a>:
+  DomainKeys Identified Mail (DKIM) Service Overview</li>
+<li><a href="http://tools.ietf.org/html/draft-ietf-dkim-deployment"
+  >draft-ietf-dkim-deployment</a> DomainKeys Identified Mail (DKIM)
+Development, Deployment and Operations</li>
 <li><a href="http://ietf.org/html.charters/dkim-charter.html">IETF
   charter: Domain Keys Identified Mail (DKIM)</a></li>
 <li><a href="http://www.postfix.org/MILTER_README.html">Postfix
@@ -2384,6 +2404,8 @@ frequent clients.</p>
 <li><a href="http://jason.long.name/dkimproxy/">Mail::DKIM and dkimproxy</a></li>
 <li><a href="http://cpan.perl.org/authors/id/J/JA/JASLONG/"
   >Mail::DKIM</a> module download page at CPAN</li>
+<li><a href="http://www.opendkim.org/">OpenDKIM</a> (fork from
+dkim-milter)</li>
 <li><a href="http://sourceforge.net/projects/dkim-milter/">dkim-milter</a></li>
 <li>See also:
 <a href="http://www.arschkrebs.de/postfix/postfix_cisco_pix_bugs.shtml"
@@ -2392,12 +2414,16 @@ frequent clients.</p>
 >heise-online article</a> on handling DKIM-signed mail
 (the solution is to upgrade PIX to version 7.2(2.19) or 8.0(2.7),
 or to disable a <i>smtp protocol fixup</i> (mis)feature</li>
+<li><a href="http://www.rfc-editor.org/rfc/rfc5598.txt">RFC 5598</a>:
+  Internet Mail Architecture</li>
+<li><a href="http://www.rfc-editor.org/rfc/rfc5451.txt">RFC 5451</a>:
+  Message Header Field for Indicating Message Authentication Status</li>
 </ul>
 
 <hr />
 <p>
 <i><a href="http://www.ijs.si/people/mark/">mm</a></i>
-<br />Last updated: 2009-03-10
+<br />Last updated: 2010-10-20
 </p>
 
 <p>

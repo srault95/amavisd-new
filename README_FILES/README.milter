@@ -15,7 +15,7 @@ NOTE1:
   in amavisd.conf, and adjust the $notify_method.
   Also, the $final_*_destiny may use D_REJECT if desired.
 
-NITE2:
+NOTE2:
   a rewrite by Petr Rehor of the helper program amavis-milter.c to use
   the new AM.PDP protocol (README.protocol) is available as a separate
   project, see: http://sourceforge.net/projects/amavisd-milter/
